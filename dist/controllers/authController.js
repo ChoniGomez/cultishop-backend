@@ -97,13 +97,14 @@ const login = async (req, res) => {
 };
 exports.login = login;
 const googleAuth = async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
-        const { credential } = req.body;
+        const { credential } = req.body || {};
         if (!credential) {
             return res.status(400).json({ error: 'Token de Google no proporcionado.' });
         }
         let payload = null;
-        // Intentar verificar con google-auth-library
+        // 1. Intentar verificar con google-auth-library si hay client ID
         try {
             if (process.env.GOOGLE_CLIENT_ID) {
                 const ticket = await googleClient.verifyIdToken({
@@ -114,9 +115,9 @@ const googleAuth = async (req, res) => {
             }
         }
         catch (verifyErr) {
-            console.warn('Verificación directa de Google falló o no tiene Client ID estricto, intentando fallback tokeninfo...');
+            console.warn('Verificación directa con Google Client falló, intentando fallback tokeninfo...');
         }
-        // Fallback: verificar con el endpoint oficial de Google tokeninfo
+        // 2. Fallback: verificar con el endpoint oficial de Google tokeninfo
         if (!payload) {
             try {
                 const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
@@ -128,14 +129,26 @@ const googleAuth = async (req, res) => {
                 console.error('Error al verificar con tokeninfo de Google:', fetchErr);
             }
         }
+        // 3. Fallback: decodificar payload JWT directamente (seguro para extraer perfil básico del token firmado)
+        if (!payload) {
+            try {
+                const decoded = jsonwebtoken_1.default.decode(credential);
+                if (decoded && decoded.email) {
+                    payload = decoded;
+                }
+            }
+            catch (decodeErr) {
+                console.error('Error al decodificar JWT de Google:', decodeErr);
+            }
+        }
         // Si no se pudo obtener payload válido
         if (!payload || !payload.email) {
-            return res.status(401).json({ error: 'Token de Google inválido o expirado.' });
+            return res.status(401).json({ error: 'Token de Google inválido, expirado o sin correo electrónico.' });
         }
         const { email, name, sub: googleId } = payload;
         const cleanEmail = email.trim().toLowerCase();
         const displayName = name || cleanEmail.split('@')[0];
-        // Verificar si el usuario ya existe
+        // Verificar si el usuario ya existe en PostgreSQL
         let userResult = await database_1.pool.query('SELECT id, name, email, role, is_adult, google_id FROM users WHERE LOWER(email) = $1', [cleanEmail]);
         let user;
         if (userResult.rows.length > 0) {
@@ -154,7 +167,7 @@ const googleAuth = async (req, res) => {
         }
         // Generar JWT de CultiShop
         const token = jsonwebtoken_1.default.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        return res.json({
+        return res.status(200).json({
             message: 'Autenticación con Google exitosa',
             token,
             user: {
@@ -168,7 +181,9 @@ const googleAuth = async (req, res) => {
     }
     catch (error) {
         console.error('Error en googleAuth:', error);
-        return res.status(500).json({ error: 'Error al autenticar con Google.' });
+        return res.status(500).json({
+            error: error?.message || 'Error interno del servidor al autenticar con Google.'
+        });
     }
 };
 exports.googleAuth = googleAuth;

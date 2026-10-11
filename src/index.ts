@@ -15,7 +15,20 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Backend funcionando correctamente' });
+  res.status(200).json({ status: 'OK', message: 'Backend funcionando correctamente' });
+});
+
+// Manejador para cualquier ruta no encontrada en /api
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ error: `Ruta de la API no encontrada: ${req.method} ${req.originalUrl}` });
+});
+
+// Middleware global de errores en formato JSON
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Error no capturado en Express:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: err?.message || 'Error interno del servidor.' });
+  }
 });
 
 app.listen(PORT, () => {
