@@ -270,9 +270,16 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 
     const finalImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
-    const numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price);
+    let numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price);
     const numDiscount = discount_price !== undefined ? Number(discount_price) : null;
     const numStock = parseInt(stock, 10) || 0;
+
+    let finalBadge = badge;
+    let finalBadgeType = badge_type || 'gold';
+    if (numStock <= 0) {
+      finalBadge = 'SIN STOCK';
+      finalBadgeType = 'red';
+    }
 
     // Resolver categorías
     const { resolvedCatId, resolvedSubcatId } = await resolveCategories(
@@ -290,6 +297,15 @@ export const createProduct = async (req: Request, res: Response) => {
       const slugCheck = await pool.query('SELECT id FROM products WHERE slug = $1', [finalSlug]);
       if (slugCheck.rows.length === 0) break;
       finalSlug = `${baseSlug}-${counter++}`;
+    }
+
+    if (Array.isArray(options) && options.length > 0) {
+      const optionPrices: number[] = options
+        .map((o: any) => (typeof o === 'object' && o !== null && o.price !== undefined ? Number(o.price) : NaN))
+        .filter((p: number): p is number => !isNaN(p) && p > 0);
+      if (optionPrices.length > 0 && (!numPrice || numPrice === 0)) {
+        numPrice = Math.min(...optionPrices);
+      }
     }
 
     const optionsJson = JSON.stringify(Array.isArray(options) ? options : [options]);
@@ -319,8 +335,8 @@ export const createProduct = async (req: Request, res: Response) => {
       numDiscount,
       numStock,
       finalImage,
-      badge,
-      badge_type,
+      finalBadge,
+      finalBadgeType,
       optionsJson,
       resolvedCatId,
       resolvedSubcatId,
@@ -412,13 +428,28 @@ export const updateProduct = async (req: Request, res: Response) => {
 
     const finalTitle = title !== undefined ? title.trim() : current.title;
     const finalDescription = description !== undefined ? description : current.description;
-    const finalPrice = price !== undefined ? (typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price)) : current.price;
+    let finalPrice = price !== undefined ? (typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price)) : current.price;
     const finalDiscount = discount_price !== undefined ? Number(discount_price) : current.discount_price;
-    const finalStock = stock !== undefined ? parseInt(stock, 10) : current.stock;
+    let finalStock = stock !== undefined ? parseInt(stock, 10) : current.stock;
+    if (isNaN(finalStock)) finalStock = 0;
     const finalImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
-    const finalBadge = badge !== undefined ? badge : current.badge;
-    const finalBadgeType = badge_type !== undefined ? badge_type : current.badge_type;
+    let finalBadge = badge !== undefined ? badge : current.badge;
+    let finalBadgeType = badge_type !== undefined ? badge_type : current.badge_type;
     const finalIsActive = is_active !== undefined ? is_active : current.is_active;
+
+    if (finalStock <= 0) {
+      finalBadge = 'SIN STOCK';
+      finalBadgeType = 'red';
+    }
+
+    if (Array.isArray(options) && options.length > 0) {
+      const optionPrices: number[] = options
+        .map((o: any) => (typeof o === 'object' && o !== null && o.price !== undefined ? Number(o.price) : NaN))
+        .filter((p: number): p is number => !isNaN(p) && p > 0);
+      if (optionPrices.length > 0 && (!finalPrice || finalPrice === 0)) {
+        finalPrice = Math.min(...optionPrices);
+      }
+    }
 
     let finalOptionsJson = current.options;
     if (options !== undefined) {
