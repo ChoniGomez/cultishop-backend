@@ -9,6 +9,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const productRoutes_1 = __importDefault(require("./routes/productRoutes"));
 const orderRoutes_1 = __importDefault(require("./routes/orderRoutes"));
+const categoryRoutes_1 = __importDefault(require("./routes/categoryRoutes"));
 const initDb_1 = require("./config/initDb");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -20,6 +21,7 @@ app.use(express_1.default.json());
 // Rutas de la API
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/products', productRoutes_1.default);
+app.use('/api/categories', categoryRoutes_1.default);
 app.use('/api/orders', orderRoutes_1.default);
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });

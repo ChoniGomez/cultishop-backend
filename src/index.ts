@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes';
 import productRoutes from './routes/productRoutes';
 import orderRoutes from './routes/orderRoutes';
+import categoryRoutes from './routes/categoryRoutes';
 import { initDb } from './config/initDb';
 
 dotenv.config();
@@ -20,6 +21,7 @@ initDb().catch(err => console.error('Error al iniciar base de datos:', err));
 // Rutas de la API
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
 
 app.get('/api/health', (req, res) => {

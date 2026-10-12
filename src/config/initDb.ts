@@ -21,11 +21,147 @@ export async function initDb() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB;
     `);
 
-    // 3. Asegurar columnas en products
+    // 3. Asegurar columnas en products (incluyendo subcategorías y pestañas de información detallada)
     await pool.query(`
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge VARCHAR(50);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20) DEFAULT 'gold';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS options JSONB;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory_id INT REFERENCES categories(id) ON DELETE SET NULL;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(255);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS origin VARCHAR(100);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS format VARCHAR(255);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS cultivation_stage VARCHAR(255);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS dosage TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS ph_recommended VARCHAR(50);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS ec_recommended VARCHAR(50);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS suitable_for TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS key_benefits JSONB;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS application_guide JSONB;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS cannabis_specs JSONB;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS shipping_info TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS details JSONB;
+      CREATE INDEX IF NOT EXISTS idx_products_subcategory_id ON products(subcategory_id);
+    `);
+
+    // 3.1 Asegurar categorías y subcategorías oficiales en la base de datos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        parent_id INT REFERENCES categories(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        description TEXT,
+        display_order INT DEFAULT 0,
+        is_visible BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Categorías Principales
+      INSERT INTO categories (name, slug, display_order) VALUES
+      ('Fertilizantes', 'fertilizantes', 1),
+      ('Indoor', 'indoor', 2),
+      ('Iluminación', 'iluminacion', 3),
+      ('Medición', 'medicion', 4),
+      ('Kits', 'kits', 5),
+      ('Parafernalia', 'parafernalia', 6),
+      ('Sustratos/Macetas', 'sustratos-macetas', 7),
+      ('Semillas', 'semillas', 8)
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Fertilizantes
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Aditivos', 'aditivos', 1 FROM categories WHERE slug = 'fertilizantes'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Bases de Crecimiento', 'bases-de-crecimiento', 2 FROM categories WHERE slug = 'fertilizantes'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Bases de Floración', 'bases-de-floracion', 3 FROM categories WHERE slug = 'fertilizantes'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Control de Plagas', 'control-de-plagas', 4 FROM categories WHERE slug = 'fertilizantes'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Radiculares', 'radiculares', 5 FROM categories WHERE slug = 'fertilizantes'
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Indoor
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Accesorios Indoor', 'accesorios-indoor', 1 FROM categories WHERE slug = 'indoor'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Armado de Salas', 'armado-de-salas', 2 FROM categories WHERE slug = 'indoor'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Carpas de Cultivo', 'carpas-de-cultivo', 3 FROM categories WHERE slug = 'indoor'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Control Ambiental', 'control-ambiental', 4 FROM categories WHERE slug = 'indoor'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Extracción y Ventilación', 'extraccion-y-ventilacion', 5 FROM categories WHERE slug = 'indoor'
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Iluminación
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Halogenados', 'halogenados', 1 FROM categories WHERE slug = 'iluminacion'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Leds', 'leds', 2 FROM categories WHERE slug = 'iluminacion'
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Medición
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Monitores Continuos', 'monitores-continuos', 1 FROM categories WHERE slug = 'medicion'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'PH y EC', 'ph-y-ec', 2 FROM categories WHERE slug = 'medicion'
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Kits
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Kits Fertilizantes', 'kits-fertilizantes', 1 FROM categories WHERE slug = 'kits'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Kits Indoor', 'kits-indoor', 2 FROM categories WHERE slug = 'kits'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Kits Parafernalia', 'kits-parafernalia', 3 FROM categories WHERE slug = 'kits'
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Parafernalia
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Armadores', 'armadores', 1 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Bandejas y Ceniceros', 'bandejas-y-ceniceros', 2 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Bongs y Pipas', 'bongs-y-pipas', 3 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Encendedores', 'encendedores', 4 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Filtros', 'filtros', 5 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Picadores', 'picadores', 6 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Sedas', 'sedas', 7 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO NOTHING;
+
+      -- Subcategorías Sustratos/Macetas
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Coco', 'coco', 1 FROM categories WHERE slug = 'sustratos-macetas'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Macetas', 'macetas', 2 FROM categories WHERE slug = 'sustratos-macetas'
+      ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Sustratos', 'sustratos', 3 FROM categories WHERE slug = 'sustratos-macetas'
+      ON CONFLICT (slug) DO NOTHING;
     `);
 
     // 4. Sembrar o actualizar usuario Administrador oficial
