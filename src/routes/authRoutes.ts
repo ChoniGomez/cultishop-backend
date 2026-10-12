@@ -1,13 +1,16 @@
 import { Router } from 'express';
-import { register, login, googleAuth, getMe } from '../controllers/authController';
+import { register, login, googleAuth, getMe, changePassword } from '../controllers/authController';
+import { requireAuth } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// Endpoints oficiales solicitados
+// Endpoints de autenticación
 router.post('/register', register);
 router.post('/login', login);
 router.post('/google', googleAuth);
-router.get('/me', getMe);
+router.get('/me', requireAuth, getMe);
+
+// Gestión de perfil y contraseña segura
+router.put('/change-password', requireAuth, changePassword);
 
 export default router;
-

@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes';
+import productRoutes from './routes/productRoutes';
+import orderRoutes from './routes/orderRoutes';
+import { initDb } from './config/initDb';
 
 dotenv.config();
 
@@ -11,11 +14,16 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
+// Inicializar verificación de esquema y usuario administrador
+initDb().catch(err => console.error('Error al iniciar base de datos:', err));
+
 // Rutas de la API
 app.use('/api/auth', authRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
 
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'OK', message: 'Backend funcionando correctamente' });
+  res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });
 });
 
 // Manejador para cualquier ruta no encontrada en /api
@@ -32,5 +40,5 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
+  console.log(`🌿 Servidor CultiShop corriendo en el puerto ${PORT}`);
 });

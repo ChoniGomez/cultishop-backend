@@ -3,9 +3,11 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { pool } from '../config/database';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cultishop_secret_jwt_token_2026';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const ADMIN_EMAIL = 'chonidacharygomez@gmail.com';
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -37,12 +39,15 @@ export const register = async (req: Request, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Asignar rol: 'admin' si es el correo designado, por defecto 'consumidor'
+    const role = cleanEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
+
     // Insertar nuevo usuario
     const result = await pool.query(
       `INSERT INTO users (name, email, password, role, is_adult, is_verified)
-       VALUES ($1, $2, $3, 'customer', true, true)
+       VALUES ($1, $2, $3, $4, true, true)
        RETURNING id, name, email, role, is_adult, created_at`,
-      [name.trim(), cleanEmail, hashedPassword]
+      [name.trim(), cleanEmail, hashedPassword, role]
     );
 
     const user = result.rows[0];
@@ -100,9 +105,16 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Credenciales inválidas. Verifica tu correo y contraseña.' });
     }
 
+    // Garantizar que si es el correo de admin tenga rol 'admin'
+    let effectiveRole = user.role || 'consumidor';
+    if (cleanEmail === ADMIN_EMAIL.toLowerCase() && effectiveRole !== 'admin') {
+      effectiveRole = 'admin';
+      await pool.query('UPDATE users SET role = $1 WHERE id = $2', ['admin', user.id]);
+    }
+
     // Generar token JWT
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, email: user.email, role: effectiveRole },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -114,7 +126,7 @@ export const login = async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: effectiveRole,
         is_adult: user.is_adult
       }
     });
@@ -161,7 +173,7 @@ export const googleAuth = async (req: Request, res: Response) => {
       }
     }
 
-    // 3. Fallback: decodificar payload JWT directamente (seguro para extraer perfil básico del token firmado)
+    // 3. Fallback: decodificar payload JWT directamente
     if (!payload) {
       try {
         const decoded = jwt.decode(credential) as any;
@@ -173,7 +185,6 @@ export const googleAuth = async (req: Request, res: Response) => {
       }
     }
 
-    // Si no se pudo obtener payload válido
     if (!payload || !payload.email) {
       return res.status(401).json({ error: 'Token de Google inválido, expirado o sin correo electrónico.' });
     }
@@ -181,6 +192,9 @@ export const googleAuth = async (req: Request, res: Response) => {
     const { email, name, sub: googleId } = payload;
     const cleanEmail = email.trim().toLowerCase();
     const displayName = name || cleanEmail.split('@')[0];
+
+    // Rol a asignar: 'admin' para correo especial, 'consumidor' para los demás
+    const targetRole = cleanEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
 
     // Verificar si el usuario ya existe en PostgreSQL
     let userResult = await pool.query(
@@ -192,24 +206,39 @@ export const googleAuth = async (req: Request, res: Response) => {
 
     if (userResult.rows.length > 0) {
       user = userResult.rows[0];
-      // Si no tiene google_id guardado, actualizarlo
+      const updates: string[] = [];
+      const values: any[] = [];
+      let valIdx = 1;
+
       if (!user.google_id) {
-        await pool.query('UPDATE users SET google_id = $1 WHERE id = $2', [googleId, user.id]);
+        updates.push(`google_id = $${valIdx++}`);
+        values.push(googleId);
+      }
+
+      if (cleanEmail === ADMIN_EMAIL.toLowerCase() && user.role !== 'admin') {
+        updates.push(`role = $${valIdx++}`);
+        values.push('admin');
+        user.role = 'admin';
+      }
+
+      if (updates.length > 0) {
+        values.push(user.id);
+        await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = $${valIdx}`, values);
       }
     } else {
-      // Registrar nuevo usuario desde Google (mayor de edad por política de cuenta de Google)
+      // Registrar nuevo usuario desde Google
       const insertResult = await pool.query(
         `INSERT INTO users (name, email, role, is_adult, is_verified, google_id)
-         VALUES ($1, $2, 'customer', true, true, $3)
+         VALUES ($1, $2, $3, true, true, $4)
          RETURNING id, name, email, role, is_adult, created_at`,
-        [displayName, cleanEmail, googleId]
+        [displayName, cleanEmail, targetRole, googleId]
       );
       user = insertResult.rows[0];
     }
 
     // Generar JWT de CultiShop
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, email: user.email, role: user.role || targetRole },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -221,7 +250,7 @@ export const googleAuth = async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: user.role || targetRole,
         is_adult: user.is_adult
       }
     });
@@ -258,3 +287,56 @@ export const getMe = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Cambio de contraseña seguro para usuarios y administradores
+ */
+export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Autenticación requerida para cambiar contraseña.' });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres.' });
+    }
+
+    // Obtener contraseña actual almacenada
+    const userResult = await pool.query('SELECT id, password, email FROM users WHERE id = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Si el usuario ya tenía contraseña previa, validar la actual
+    if (user.password) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Debes ingresar tu contraseña actual.' });
+      }
+
+      const isCurrentValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isCurrentValid) {
+        return res.status(400).json({ error: 'La contraseña actual ingresada es incorrecta.' });
+      }
+    }
+
+    // Hashear la nueva contraseña
+    const salt = await bcrypt.genSalt(10);
+    const hashedNewPassword = await bcrypt.hash(newPassword, salt);
+
+    await pool.query(
+      'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2',
+      [hashedNewPassword, userId]
+    );
+
+    return res.status(200).json({
+      message: '¡Contraseña actualizada con éxito!'
+    });
+  } catch (error: any) {
+    console.error('Error en changePassword:', error);
+    return res.status(500).json({ error: 'Error interno del servidor al cambiar la contraseña.' });
+  }
+};
