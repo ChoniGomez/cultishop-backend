@@ -6,12 +6,12 @@ import {
   updateOrderStatus, 
   deleteOrder 
 } from '../controllers/orderController';
-import { requireAuth, requireAdmin } from '../middleware/authMiddleware';
+import { requireAuth, requireAdmin, optionalAuth } from '../middleware/authMiddleware';
 
 const router = Router();
 
 // Crear pedido (consumidores registrados o invitados)
-router.post('/', createOrder);
+router.post('/', optionalAuth, createOrder);
 
 // Ver mis pedidos (usuario autenticado)
 router.get('/my-orders', requireAuth, getMyOrders);

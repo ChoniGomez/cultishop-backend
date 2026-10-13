@@ -70,3 +70,32 @@ export const requireAdmin = (
 
   next();
 };
+
+export const optionalAuth = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      if (token) {
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        if (decoded && decoded.id) {
+          const userResult = await pool.query(
+            'SELECT id, name, email, role, is_adult FROM users WHERE id = $1',
+            [decoded.id]
+          );
+          if (userResult.rows.length > 0) {
+            req.user = userResult.rows[0];
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Si el token es inválido o no existe, simplemente continúa sin autenticar
+  }
+  next();
+};
+

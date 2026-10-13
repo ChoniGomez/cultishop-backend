@@ -1,33 +1,97 @@
 import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { ADMIN_EMAIL } from '../config/initDb';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'cultishop_secret_jwt_token_2026';
 
 /**
- * Crear un nuevo pedido (realizado por un consumidor)
+ * Crear un nuevo pedido (realizado por un consumidor o invitado)
  */
 export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id || null;
+    let userId = req.user?.id || null;
+    let authUser = req.user || null;
+    let authToken: string | null = null;
+
     const {
       customer_name,
       customer_email,
+      phone,
       whatsapp_phone,
+      country = 'Argentina',
+      street_address,
+      apartment,
+      city,
+      state,
+      postal_code,
+      payment_method = 'transferencia',
+      shipping_method = 'retiro_local',
       shipping_address,
       notes,
       items = [],
-      total_amount
+      total_amount,
+      create_account,
+      password
     } = req.body;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ error: 'El pedido debe contener al menos un producto.' });
     }
 
+    const clientName = customer_name ? customer_name.trim() : (req.user?.name || 'Cliente CultiShop');
+    const clientEmail = customer_email ? customer_email.trim().toLowerCase() : (req.user?.email || null);
+    const clientPhone = phone || whatsapp_phone || null;
+
+    // Si el usuario marcó "¿Crear una cuenta?" y no está logueado
+    if (!userId && create_account && password && clientEmail) {
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'La contraseña para crear la cuenta debe tener al menos 6 caracteres.' });
+      }
+
+      // Verificar si ya existe un usuario con este correo
+      const existingUser = await pool.query(
+        'SELECT id, name, email, role, is_adult FROM users WHERE LOWER(email) = $1',
+        [clientEmail]
+      );
+
+      if (existingUser.rows.length > 0) {
+        userId = existingUser.rows[0].id;
+        authUser = existingUser.rows[0];
+      } else {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        const role = clientEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
+
+        const newUserResult = await pool.query(`
+          INSERT INTO users (name, email, password, role, is_adult, is_verified)
+          VALUES ($1, $2, $3, $4, true, true)
+          RETURNING id, name, email, role, is_adult, created_at
+        `, [clientName, clientEmail, hashedPassword, role]);
+
+        const newUser = newUserResult.rows[0];
+        authUser = newUser;
+        userId = newUser.id;
+
+        authToken = jwt.sign(
+          { id: newUser.id, email: newUser.email, role: newUser.role },
+          JWT_SECRET,
+          { expiresIn: '7d' }
+        );
+      }
+    }
+
     const calculatedTotal = total_amount 
       ? parseFloat(total_amount) 
       : items.reduce((acc: number, item: any) => acc + (parseFloat(item.unitPrice || item.price || 0) * (item.quantity || 1)), 0);
 
-    const clientName = customer_name || req.user?.name || 'Cliente CultiShop';
-    const clientEmail = customer_email || req.user?.email || null;
+    // Formatear dirección limpia y consolidada
+    const formattedAddress = street_address 
+      ? `${street_address}${apartment ? ', Depto/Piso: ' + apartment : ''}, ${city || ''}, ${state || ''} (CP: ${postal_code || ''}), ${country}`
+      : (shipping_address || 'Retiro en Local Oficial (Posadas)');
+
     const itemsJson = JSON.stringify(items);
 
     const orderResult = await pool.query(`
@@ -36,19 +100,37 @@ export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
         customer_name, 
         customer_email, 
         whatsapp_phone, 
+        phone,
+        country,
+        street_address,
+        apartment,
+        city,
+        state,
+        postal_code,
+        payment_method,
+        shipping_method,
         shipping_address, 
         notes, 
         items, 
         total_amount, 
         status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'pending')
       RETURNING *
     `, [
       userId,
       clientName,
       clientEmail,
-      whatsapp_phone || null,
-      shipping_address || null,
+      clientPhone,
+      clientPhone,
+      country || 'Argentina',
+      street_address || null,
+      apartment || null,
+      city || null,
+      state || null,
+      postal_code || null,
+      payment_method,
+      shipping_method,
+      formattedAddress,
       notes || null,
       itemsJson,
       calculatedTotal
@@ -59,20 +141,18 @@ export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
     // Opcionalmente registrar en order_items si los product_id son numéricos válidos
     try {
       for (const it of items) {
-        if (it.productId || it.id) {
-          const pId = it.productId || it.id;
-          if (typeof pId === 'number') {
-            await pool.query(`
-              INSERT INTO order_items (order_id, product_id, quantity, unit_price, selected_option)
-              VALUES ($1, $2, $3, $4, $5)
-            `, [
-              newOrder.id,
-              pId,
-              it.quantity || 1,
-              parseFloat(it.unitPrice || it.price || 0),
-              it.selectedOption || it.option || 'Estándar'
-            ]);
-          }
+        const pId = it.productId || it.id;
+        if (pId && typeof pId === 'number') {
+          await pool.query(`
+            INSERT INTO order_items (order_id, product_id, quantity, unit_price, selected_option)
+            VALUES ($1, $2, $3, $4, $5)
+          `, [
+            newOrder.id,
+            pId,
+            it.quantity || 1,
+            parseFloat(it.unitPrice || it.price || 0),
+            it.selectedOption || it.option || 'Estándar'
+          ]);
         }
       }
     } catch (itemErr) {
@@ -84,7 +164,9 @@ export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
       order: {
         ...newOrder,
         items: typeof newOrder.items === 'string' ? JSON.parse(newOrder.items) : newOrder.items
-      }
+      },
+      token: authToken,
+      user: authUser
     });
   } catch (error: any) {
     console.error('Error en createOrder:', error);
@@ -103,7 +185,16 @@ export const getAllOrders = async (req: Request, res: Response) => {
         o.user_id,
         COALESCE(o.customer_name, u.name, 'Cliente') as customer_name,
         COALESCE(o.customer_email, u.email, 'Sin email') as customer_email,
-        o.whatsapp_phone,
+        COALESCE(o.whatsapp_phone, o.phone) as whatsapp_phone,
+        o.phone,
+        o.country,
+        o.street_address,
+        o.apartment,
+        o.city,
+        o.state,
+        o.postal_code,
+        o.payment_method,
+        o.shipping_method,
         o.shipping_address,
         o.notes,
         o.items,

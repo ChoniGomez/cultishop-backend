@@ -17,10 +17,22 @@ async function initDb() {
       ALTER TABLE users ALTER COLUMN role SET DEFAULT 'consumidor';
       UPDATE users SET role = 'consumidor' WHERE role = 'customer' OR role IS NULL;
     `);
-        // 2. Asegurar columnas en orders por si hiciera falta
+        // 2. Asegurar columnas en orders para checkout y envíos
         await database_1.pool.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS whatsapp_phone VARCHAR(50);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS country VARCHAR(100) DEFAULT 'Argentina';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS street_address TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS apartment TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS city VARCHAR(100);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS state VARCHAR(100);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS postal_code VARCHAR(50);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(100);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_method VARCHAR(100);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_address TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB;
     `);
         // 3. Asegurar columnas en products (incluyendo subcategorías y pestañas de información detallada)
