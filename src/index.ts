@@ -5,6 +5,7 @@ import authRoutes from './routes/authRoutes';
 import productRoutes from './routes/productRoutes';
 import orderRoutes from './routes/orderRoutes';
 import categoryRoutes from './routes/categoryRoutes';
+import bannerRoutes from './routes/bannerRoutes';
 import { initDb } from './config/initDb';
 
 dotenv.config();
@@ -13,7 +14,8 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Inicializar verificación de esquema y usuario administrador
 initDb().catch(err => console.error('Error al iniciar base de datos:', err));
@@ -23,6 +25,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/banners', bannerRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });
@@ -37,7 +40,8 @@ app.all('/api/*', (req, res) => {
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error no capturado en Express:', err);
   if (!res.headersSent) {
-    res.status(500).json({ error: err?.message || 'Error interno del servidor.' });
+    const status = err?.status || err?.statusCode || 500;
+    res.status(status).json({ error: err?.message || 'Error interno del servidor.' });
   }
 });
 

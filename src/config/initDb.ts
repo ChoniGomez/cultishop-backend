@@ -43,7 +43,68 @@ export async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_products_subcategory_id ON products(subcategory_id);
     `);
 
-    // 3.1 Asegurar categorías y subcategorías oficiales en la base de datos
+    // 3.1 Asegurar tabla de banners publicitarios (Hero Carousel)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS banners (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        subtitle TEXT,
+        image_url TEXT NOT NULL,
+        link_url TEXT,
+        button_text VARCHAR(100) DEFAULT 'Ver Más',
+        display_order INT DEFAULT 0,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Sembrar banners iniciales si la tabla está vacía
+    const bannerCount = await pool.query('SELECT COUNT(*) FROM banners');
+    if (parseInt(bannerCount.rows[0].count, 10) === 0) {
+      await pool.query(`
+        INSERT INTO banners (title, subtitle, image_url, link_url, button_text, display_order, is_active) VALUES
+        (
+          'PROTEGÉ TU CULTIVO CONTRA TODO TIPO DE PLAGAS',
+          'Soluciones confiables y sanidad vegetal Mamboretá oficiales (D, CONFI, FOLI, ABA, OIL). Resultados comprobados para mantener tu jardín sano.',
+          'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=1800',
+          '/categoria/control-de-plagas',
+          'Ver Control de Plagas',
+          1,
+          true
+        ),
+        (
+          'EXPLOSIÓN DE RESINA, FLORES Y RAÍCES FUERTES',
+          'Línea completa Namasté Nutrientes: Oro Negro, Amazonia Micorrizas, Flora Booster y Trico+. Stock permanente para cada etapa de tu cultivo.',
+          'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=1800',
+          '/categoria/fertilizantes',
+          'Ver Fertilizantes',
+          2,
+          true
+        ),
+        (
+          'VISITANOS EN NUESTRO LOCAL • HORARIOS DE ATENCIÓN',
+          'Av. López y Planes 2919 (entre Lavalle y Santa Catalina) • Posadas, Misiones. Vení a conocer todo nuestro catálogo con asesoramiento profesional.',
+          'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=1800',
+          'https://maps.google.com/?q=Av.+López+y+Planes+2919,+Posadas',
+          'Cómo Llegar (Google Maps)',
+          3,
+          true
+        ),
+        (
+          'CARPAS, MEDICIÓN Y KITS COMPLETOS DE CULTIVO',
+          'Tecnología y precisión para tu espacio: carpas indoor, paneles LED de alta eficiencia, instrumentos PH/EC y kits completos.',
+          'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=1800',
+          '/categoria/indoor',
+          'Explorar Indoor',
+          4,
+          true
+        );
+      `);
+      console.log('✅ Banners publicitarios iniciales configurados en la base de datos');
+    }
+
+    // 3.2 Asegurar categorías y subcategorías oficiales en la base de datos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,

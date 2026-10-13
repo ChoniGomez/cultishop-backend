@@ -10,12 +10,14 @@ const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const productRoutes_1 = __importDefault(require("./routes/productRoutes"));
 const orderRoutes_1 = __importDefault(require("./routes/orderRoutes"));
 const categoryRoutes_1 = __importDefault(require("./routes/categoryRoutes"));
+const bannerRoutes_1 = __importDefault(require("./routes/bannerRoutes"));
 const initDb_1 = require("./config/initDb");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 4000;
 app.use((0, cors_1.default)());
-app.use(express_1.default.json());
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
 // Inicializar verificación de esquema y usuario administrador
 (0, initDb_1.initDb)().catch(err => console.error('Error al iniciar base de datos:', err));
 // Rutas de la API
@@ -23,6 +25,7 @@ app.use('/api/auth', authRoutes_1.default);
 app.use('/api/products', productRoutes_1.default);
 app.use('/api/categories', categoryRoutes_1.default);
 app.use('/api/orders', orderRoutes_1.default);
+app.use('/api/banners', bannerRoutes_1.default);
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });
 });
@@ -34,7 +37,8 @@ app.all('/api/*', (req, res) => {
 app.use((err, req, res, next) => {
     console.error('Error no capturado en Express:', err);
     if (!res.headersSent) {
-        res.status(500).json({ error: err?.message || 'Error interno del servidor.' });
+        const status = err?.status || err?.statusCode || 500;
+        res.status(status).json({ error: err?.message || 'Error interno del servidor.' });
     }
 });
 app.listen(PORT, () => {
