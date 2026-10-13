@@ -54,9 +54,11 @@ export async function initDb() {
         button_text VARCHAR(100) DEFAULT 'Ver Más',
         display_order INT DEFAULT 0,
         is_active BOOLEAN DEFAULT TRUE,
+        show_text BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE banners ADD COLUMN IF NOT EXISTS show_text BOOLEAN DEFAULT TRUE;
     `);
 
     // Sembrar banners iniciales si la tabla está vacía

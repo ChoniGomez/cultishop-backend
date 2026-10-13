@@ -20,6 +20,7 @@ const getActiveBanners = async (req, res) => {
           button_text,
           display_order,
           is_active,
+          show_text,
           created_at,
           updated_at
         FROM banners
@@ -35,6 +36,7 @@ const getActiveBanners = async (req, res) => {
           button_text,
           display_order,
           is_active,
+          show_text,
           created_at,
           updated_at
         FROM banners
@@ -44,6 +46,7 @@ const getActiveBanners = async (req, res) => {
         const result = await database_1.pool.query(query);
         const formattedRows = result.rows.map((row) => ({
             ...row,
+            show_text: row.show_text !== false,
             image: row.image_url,
             cta_text: row.button_text,
             cta_link: row.link_url
@@ -75,6 +78,7 @@ const getAllBannersAdmin = async (req, res) => {
         button_text,
         display_order,
         is_active,
+        show_text,
         created_at,
         updated_at
       FROM banners
@@ -82,6 +86,7 @@ const getAllBannersAdmin = async (req, res) => {
     `);
         const formattedRows = result.rows.map((row) => ({
             ...row,
+            show_text: row.show_text !== false,
             image: row.image_url,
             cta_text: row.button_text,
             cta_link: row.link_url
@@ -126,9 +131,11 @@ exports.getBannerById = getBannerById;
  */
 const createBanner = async (req, res) => {
     try {
-        const { title, subtitle, image_url, link_url, button_text = 'Ver Más', display_order = 0, is_active = true } = req.body;
-        if (!title || !title.trim()) {
-            return res.status(400).json({ error: 'El título del banner es obligatorio.' });
+        const { title, subtitle, image_url, link_url, button_text = 'Ver Más', display_order = 0, is_active = true, show_text = true } = req.body;
+        const showTextBool = show_text !== false && show_text !== 'false';
+        const finalTitle = title && title.trim() ? title.trim() : (showTextBool ? '' : 'Banner Publicitario');
+        if (!finalTitle) {
+            return res.status(400).json({ error: 'El título del banner es obligatorio cuando se muestran textos.' });
         }
         if (!image_url || !image_url.trim()) {
             return res.status(400).json({ error: 'La URL de la imagen horizontal del banner es obligatoria.' });
@@ -144,18 +151,20 @@ const createBanner = async (req, res) => {
         button_text,
         display_order,
         is_active,
+        show_text,
         created_at,
         updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
       RETURNING *
     `, [
-            title.trim(),
+            finalTitle,
             subtitle ? subtitle.trim() : null,
             image_url.trim(),
             link_url ? link_url.trim() : null,
             button_text ? button_text.trim() : 'Ver Más',
             numOrder,
-            activeBool
+            activeBool,
+            showTextBool
         ]);
         const newBanner = insertResult.rows[0];
         return res.status(201).json({
@@ -185,9 +194,12 @@ const updateBanner = async (req, res) => {
             return res.status(404).json({ error: 'El banner no existe.' });
         }
         const current = existingCheck.rows[0];
-        const { title, subtitle, image_url, link_url, button_text, display_order, is_active } = req.body;
-        const finalTitle = title !== undefined ? title.trim() : current.title;
-        if (!finalTitle) {
+        const { title, subtitle, image_url, link_url, button_text, display_order, is_active, show_text } = req.body;
+        const finalShowText = show_text !== undefined ? (show_text !== false && show_text !== 'false') : (current.show_text !== false);
+        const finalTitle = title !== undefined
+            ? (title.trim() || (finalShowText ? '' : (current.title || 'Banner Publicitario')))
+            : current.title;
+        if (!finalTitle && finalShowText) {
             return res.status(400).json({ error: 'El título no puede estar vacío.' });
         }
         const finalImage = image_url !== undefined ? image_url.trim() : current.image_url;
@@ -209,17 +221,19 @@ const updateBanner = async (req, res) => {
         button_text = $5,
         display_order = $6,
         is_active = $7,
+        show_text = $8,
         updated_at = NOW()
-      WHERE id = $8
+      WHERE id = $9
       RETURNING *
     `, [
-            finalTitle,
+            finalTitle || 'Banner Publicitario',
             finalSubtitle,
             finalImage,
             finalLink,
             finalButtonText,
             finalOrder,
             finalIsActive,
+            finalShowText,
             bannerId
         ]);
         return res.json({
