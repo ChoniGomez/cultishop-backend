@@ -68,9 +68,26 @@ const formatProductRow = (row) => {
         subcategorySlug = row.category_slug;
         subcategoryId = row.category_id;
     }
+    const defaultStock = typeof row.stock === 'number' ? row.stock : parseInt(row.stock, 10) || 10;
+    const defaultPrice = typeof row.price === 'number' ? row.price : parseFloat(row.price) || 0;
+    const rawOptions = Array.isArray(row.options) ? row.options : parseJsonField(row.options, ['Estándar']);
+    const formattedOptions = Array.isArray(rawOptions) ? rawOptions.map((opt) => {
+        if (typeof opt === 'object' && opt !== null) {
+            return {
+                name: String(opt.name || opt.title || 'Estándar').trim(),
+                price: typeof opt.price === 'number' ? opt.price : (parseFloat(opt.price) || defaultPrice),
+                stock: opt.stock !== undefined && opt.stock !== null && opt.stock !== '' ? parseInt(String(opt.stock), 10) : defaultStock
+            };
+        }
+        return {
+            name: String(opt).trim(),
+            price: defaultPrice,
+            stock: defaultStock
+        };
+    }) : [{ name: 'Estándar', price: defaultPrice, stock: defaultStock }];
     return {
         ...row,
-        price: typeof row.price === 'number' ? row.price : parseFloat(row.price) || 0,
+        price: defaultPrice,
         image: row.image_url,
         category: categoryName || 'Varios',
         category_slug: categorySlug || '',
@@ -78,7 +95,7 @@ const formatProductRow = (row) => {
         subcategory: subcategoryName || null,
         subcategory_slug: subcategorySlug || null,
         subcategory_id: subcategoryId || null,
-        options: Array.isArray(row.options) ? row.options : parseJsonField(row.options, ['Estándar']),
+        options: formattedOptions,
         key_benefits: Array.isArray(row.key_benefits) ? row.key_benefits : parseJsonField(row.key_benefits, []),
         application_guide: Array.isArray(row.application_guide) ? row.application_guide : parseJsonField(row.application_guide, []),
         cannabis_specs: parseJsonField(row.cannabis_specs, null),
@@ -219,8 +236,39 @@ const createProduct = async (req, res) => {
         const finalImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
         let numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price);
         const numDiscount = discount_price !== undefined ? Number(discount_price) : null;
-        const numStock = parseInt(stock, 10) || 0;
-        let finalBadge = badge;
+        let numStock = parseInt(stock, 10) || 0;
+        // Normalizar opciones con precio y stock independiente
+        let normalizedOptions = [];
+        if (Array.isArray(options) && options.length > 0) {
+            normalizedOptions = options.map((o) => {
+                if (typeof o === 'object' && o !== null) {
+                    const optName = String(o.name || o.title || 'Estándar').trim();
+                    const optPrice = typeof o.price === 'string' ? parseFloat(o.price.replace(/[^0-9.-]/g, '')) || 0 : Number(o.price) || 0;
+                    const optStock = o.stock !== undefined && o.stock !== null && o.stock !== ''
+                        ? Math.max(0, parseInt(String(o.stock), 10) || 0)
+                        : numStock;
+                    return { name: optName, price: optPrice, stock: optStock };
+                }
+                return { name: String(o).trim(), price: numPrice, stock: numStock };
+            }).filter((o) => o.name.length > 0);
+        }
+        if (normalizedOptions.length === 0) {
+            normalizedOptions = [{ name: 'Estándar', price: numPrice, stock: numStock }];
+        }
+        const optionPrices = normalizedOptions
+            .map((o) => o.price)
+            .filter((p) => !isNaN(p) && p > 0);
+        if (optionPrices.length > 0 && (!numPrice || numPrice === 0)) {
+            numPrice = Math.min(...optionPrices);
+        }
+        const totalVariantStock = normalizedOptions.reduce((acc, curr) => acc + (curr.stock || 0), 0);
+        if (normalizedOptions.length > 1) {
+            numStock = totalVariantStock;
+        }
+        let finalBadge = badge !== undefined && badge !== null ? String(badge).trim() : 'STOCK DISPONIBLE';
+        if (finalBadge === 'none' || (finalBadge && finalBadge.toLowerCase() === 'sin etiqueta') || finalBadge === '') {
+            finalBadge = null;
+        }
         let finalBadgeType = badge_type || 'gold';
         if (numStock <= 0) {
             finalBadge = 'SIN STOCK';
@@ -238,15 +286,7 @@ const createProduct = async (req, res) => {
                 break;
             finalSlug = `${baseSlug}-${counter++}`;
         }
-        if (Array.isArray(options) && options.length > 0) {
-            const optionPrices = options
-                .map((o) => (typeof o === 'object' && o !== null && o.price !== undefined ? Number(o.price) : NaN))
-                .filter((p) => !isNaN(p) && p > 0);
-            if (optionPrices.length > 0 && (!numPrice || numPrice === 0)) {
-                numPrice = Math.min(...optionPrices);
-            }
-        }
-        const optionsJson = JSON.stringify(Array.isArray(options) ? options : [options]);
+        const optionsJson = JSON.stringify(normalizedOptions);
         const benefitsArray = normalizeStringArray(key_benefits);
         const guideArray = normalizeStringArray(application_guide);
         const specsJson = cannabis_specs ? JSON.stringify(cannabis_specs) : null;
@@ -331,24 +371,48 @@ const updateProduct = async (req, res) => {
         if (isNaN(finalStock))
             finalStock = 0;
         const finalImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
-        let finalBadge = badge !== undefined ? badge : current.badge;
+        let finalBadge = badge !== undefined ? (badge !== null ? String(badge).trim() : null) : current.badge;
+        if (finalBadge === 'none' || (finalBadge && finalBadge.toLowerCase() === 'sin etiqueta') || finalBadge === '') {
+            finalBadge = null;
+        }
         let finalBadgeType = badge_type !== undefined ? badge_type : current.badge_type;
         const finalIsActive = is_active !== undefined ? is_active : current.is_active;
+        let finalOptionsJson = current.options;
+        if (options !== undefined) {
+            let normalizedOptions = [];
+            if (Array.isArray(options) && options.length > 0) {
+                normalizedOptions = options.map((o) => {
+                    if (typeof o === 'object' && o !== null) {
+                        const optName = String(o.name || o.title || 'Estándar').trim();
+                        const optPrice = typeof o.price === 'string' ? parseFloat(o.price.replace(/[^0-9.-]/g, '')) || 0 : Number(o.price) || 0;
+                        const optStock = o.stock !== undefined && o.stock !== null && o.stock !== ''
+                            ? Math.max(0, parseInt(String(o.stock), 10) || 0)
+                            : finalStock;
+                        return { name: optName, price: optPrice, stock: optStock };
+                    }
+                    return { name: String(o).trim(), price: finalPrice, stock: finalStock };
+                }).filter((o) => o.name.length > 0);
+            }
+            if (normalizedOptions.length > 0) {
+                const optionPrices = normalizedOptions
+                    .map((o) => o.price)
+                    .filter((p) => !isNaN(p) && p > 0);
+                if (optionPrices.length > 0 && (!finalPrice || finalPrice === 0)) {
+                    finalPrice = Math.min(...optionPrices);
+                }
+                const totalVariantStock = normalizedOptions.reduce((acc, curr) => acc + (curr.stock || 0), 0);
+                if (normalizedOptions.length > 1) {
+                    finalStock = totalVariantStock;
+                }
+                finalOptionsJson = JSON.stringify(normalizedOptions);
+            }
+            else {
+                finalOptionsJson = JSON.stringify([{ name: 'Estándar', price: finalPrice, stock: finalStock }]);
+            }
+        }
         if (finalStock <= 0) {
             finalBadge = 'SIN STOCK';
             finalBadgeType = 'red';
-        }
-        if (Array.isArray(options) && options.length > 0) {
-            const optionPrices = options
-                .map((o) => (typeof o === 'object' && o !== null && o.price !== undefined ? Number(o.price) : NaN))
-                .filter((p) => !isNaN(p) && p > 0);
-            if (optionPrices.length > 0 && (!finalPrice || finalPrice === 0)) {
-                finalPrice = Math.min(...optionPrices);
-            }
-        }
-        let finalOptionsJson = current.options;
-        if (options !== undefined) {
-            finalOptionsJson = JSON.stringify(Array.isArray(options) ? options : [options]);
         }
         const finalBrand = brand !== undefined ? brand : current.brand;
         const finalOrigin = origin !== undefined ? origin : current.origin;
