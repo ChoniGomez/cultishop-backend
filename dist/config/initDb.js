@@ -34,6 +34,16 @@ async function initDb() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_address TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB;
+
+      CREATE TABLE IF NOT EXISTS order_items (
+        id SERIAL PRIMARY KEY,
+        order_id INT REFERENCES orders(id) ON DELETE CASCADE,
+        product_id INT REFERENCES products(id) ON DELETE SET NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        unit_price DECIMAL(12, 2) NOT NULL,
+        selected_option VARCHAR(100)
+      );
+      ALTER TABLE order_items ADD COLUMN IF NOT EXISTS selected_option VARCHAR(100);
     `);
         // 3. Asegurar columnas en products (incluyendo subcategorías y pestañas de información detallada)
         await database_1.pool.query(`
