@@ -187,16 +187,27 @@ exports.getAllOrders = getAllOrders;
  */
 const getMyOrders = async (req, res) => {
     try {
-        const userId = req.user?.id;
-        const userEmail = req.user?.email?.toLowerCase();
-        if (!userId) {
+        const authId = req.user?.id;
+        const authEmail = req.user?.email?.toLowerCase();
+        const authRole = req.user?.role;
+        if (!authId) {
             return res.status(401).json({ error: 'Usuario no autenticado.' });
+        }
+        // Si se especifica un :userId en los parámetros, solo el admin puede consultar de otros
+        let targetUserId = authId;
+        if (req.params?.userId) {
+            const paramId = parseInt(req.params.userId, 10);
+            if (!isNaN(paramId)) {
+                if (authRole === 'admin' || paramId === authId) {
+                    targetUserId = paramId;
+                }
+            }
         }
         const result = await database_1.pool.query(`
       SELECT * FROM orders 
-      WHERE user_id = $1 OR LOWER(customer_email) = $2
-      ORDER BY created_at DESC
-    `, [userId, userEmail]);
+      WHERE user_id = $1 OR (customer_email IS NOT NULL AND LOWER(customer_email) = $2)
+      ORDER BY id DESC, created_at DESC
+    `, [targetUserId, authEmail]);
         const orders = result.rows.map(row => ({
             ...row,
             total_amount: typeof row.total_amount === 'number' ? row.total_amount : parseFloat(row.total_amount) || 0,

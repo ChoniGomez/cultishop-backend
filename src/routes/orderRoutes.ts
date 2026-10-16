@@ -15,6 +15,7 @@ router.post('/', optionalAuth, createOrder);
 
 // Ver mis pedidos (usuario autenticado)
 router.get('/my-orders', requireAuth, getMyOrders);
+router.get('/user/:userId', requireAuth, getMyOrders);
 
 // Gestión de pedidos (Solo Admin)
 router.get('/', requireAuth, requireAdmin, getAllOrders);

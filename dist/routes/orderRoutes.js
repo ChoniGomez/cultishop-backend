@@ -8,6 +8,7 @@ const router = (0, express_1.Router)();
 router.post('/', authMiddleware_1.optionalAuth, orderController_1.createOrder);
 // Ver mis pedidos (usuario autenticado)
 router.get('/my-orders', authMiddleware_1.requireAuth, orderController_1.getMyOrders);
+router.get('/user/:userId', authMiddleware_1.requireAuth, orderController_1.getMyOrders);
 // Gestión de pedidos (Solo Admin)
 router.get('/', authMiddleware_1.requireAuth, authMiddleware_1.requireAdmin, orderController_1.getAllOrders);
 router.patch('/:id/status', authMiddleware_1.requireAuth, authMiddleware_1.requireAdmin, orderController_1.updateOrderStatus);
