@@ -151,7 +151,7 @@ async function initDb() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- Categorías Principales
+      -- Categorías Principales (8 Oficiales)
       INSERT INTO categories (name, slug, display_order) VALUES
       ('Fertilizantes', 'fertilizantes', 1),
       ('Indoor', 'indoor', 2),
@@ -160,10 +160,19 @@ async function initDb() {
       ('Kits', 'kits', 5),
       ('Parafernalia', 'parafernalia', 6),
       ('Sustratos/Macetas', 'sustratos-macetas', 7),
-      ('Semillas', 'semillas', 8),
-      ('Lavado de Raíces', 'lavado-de-raices', 9),
-      ('Accesorios', 'accesorios', 10)
+      ('Semillas', 'semillas', 8)
       ON CONFLICT (slug) DO NOTHING;
+
+      -- Corregir jerarquía si existían como categorías independientes
+      UPDATE categories 
+      SET parent_id = (SELECT id FROM categories WHERE slug = 'fertilizantes'),
+          display_order = 6
+      WHERE slug = 'lavado-de-raices';
+
+      UPDATE categories 
+      SET parent_id = (SELECT id FROM categories WHERE slug = 'parafernalia'),
+          display_order = 8
+      WHERE slug = 'accesorios';
 
       -- Subcategorías Fertilizantes
       INSERT INTO categories (parent_id, name, slug, display_order)
@@ -181,6 +190,9 @@ async function initDb() {
       INSERT INTO categories (parent_id, name, slug, display_order)
       SELECT id, 'Radiculares', 'radiculares', 5 FROM categories WHERE slug = 'fertilizantes'
       ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Lavado de Raíces', 'lavado-de-raices', 6 FROM categories WHERE slug = 'fertilizantes'
+      ON CONFLICT (slug) DO UPDATE SET parent_id = EXCLUDED.parent_id, display_order = EXCLUDED.display_order;
 
       -- Subcategorías Indoor
       INSERT INTO categories (parent_id, name, slug, display_order)
@@ -248,6 +260,9 @@ async function initDb() {
       INSERT INTO categories (parent_id, name, slug, display_order)
       SELECT id, 'Sedas', 'sedas', 7 FROM categories WHERE slug = 'parafernalia'
       ON CONFLICT (slug) DO NOTHING;
+      INSERT INTO categories (parent_id, name, slug, display_order)
+      SELECT id, 'Accesorios', 'accesorios', 8 FROM categories WHERE slug = 'parafernalia'
+      ON CONFLICT (slug) DO UPDATE SET parent_id = EXCLUDED.parent_id, display_order = EXCLUDED.display_order;
 
       -- Subcategorías Sustratos/Macetas
       INSERT INTO categories (parent_id, name, slug, display_order)
