@@ -7,7 +7,6 @@ import { AuthenticatedRequest } from '../middleware/authMiddleware';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cultishop_secret_jwt_token_2026';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-const ADMIN_EMAIL = 'chonidacharygomez@gmail.com';
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -39,8 +38,8 @@ export const register = async (req: Request, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Asignar rol: 'admin' si es el correo designado, por defecto 'consumidor'
-    const role = cleanEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
+    // Por defecto rol 'consumidor'. Los permisos de 'admin' se gestionan en base de datos.
+    const role = 'consumidor';
 
     // Insertar nuevo usuario
     const result = await pool.query(
@@ -105,12 +104,8 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Credenciales inválidas. Verifica tu correo y contraseña.' });
     }
 
-    // Garantizar que si es el correo de admin tenga rol 'admin'
-    let effectiveRole = user.role || 'consumidor';
-    if (cleanEmail === ADMIN_EMAIL.toLowerCase() && effectiveRole !== 'admin') {
-      effectiveRole = 'admin';
-      await pool.query('UPDATE users SET role = $1 WHERE id = $2', ['admin', user.id]);
-    }
+    // Rol verificado dinámicamente según la base de datos Neon
+    const effectiveRole = user.role || 'consumidor';
 
     // Generar token JWT
     const token = jwt.sign(
@@ -193,9 +188,6 @@ export const googleAuth = async (req: Request, res: Response) => {
     const cleanEmail = email.trim().toLowerCase();
     const displayName = name || cleanEmail.split('@')[0];
 
-    // Rol a asignar: 'admin' para correo especial, 'consumidor' para los demás
-    const targetRole = cleanEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
-
     // Verificar si el usuario ya existe en PostgreSQL
     let userResult = await pool.query(
       'SELECT id, name, email, role, is_adult, google_id FROM users WHERE LOWER(email) = $1',
@@ -206,39 +198,28 @@ export const googleAuth = async (req: Request, res: Response) => {
 
     if (userResult.rows.length > 0) {
       user = userResult.rows[0];
-      const updates: string[] = [];
-      const values: any[] = [];
-      let valIdx = 1;
-
+      // Si el usuario existe pero no tenía google_id, vincularlo
       if (!user.google_id) {
-        updates.push(`google_id = $${valIdx++}`);
-        values.push(googleId);
-      }
-
-      if (cleanEmail === ADMIN_EMAIL.toLowerCase() && user.role !== 'admin') {
-        updates.push(`role = $${valIdx++}`);
-        values.push('admin');
-        user.role = 'admin';
-      }
-
-      if (updates.length > 0) {
-        values.push(user.id);
-        await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = $${valIdx}`, values);
+        await pool.query('UPDATE users SET google_id = $1 WHERE id = $2', [googleId, user.id]);
+        user.google_id = googleId;
       }
     } else {
-      // Registrar nuevo usuario desde Google
+      // Registrar nuevo usuario desde Google con rol consumidor por defecto
       const insertResult = await pool.query(
         `INSERT INTO users (name, email, role, is_adult, is_verified, google_id)
-         VALUES ($1, $2, $3, true, true, $4)
+         VALUES ($1, $2, 'consumidor', true, true, $3)
          RETURNING id, name, email, role, is_adult, created_at`,
-        [displayName, cleanEmail, targetRole, googleId]
+        [displayName, cleanEmail, googleId]
       );
       user = insertResult.rows[0];
     }
 
+    // El rol efectivo proviene siempre dinámicamente de la base de datos Neon
+    const effectiveRole = user.role || 'consumidor';
+
     // Generar JWT de CultiShop
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role || targetRole },
+      { id: user.id, email: user.email, role: effectiveRole },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -250,7 +231,7 @@ export const googleAuth = async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role || targetRole,
+        role: effectiveRole,
         is_adult: user.is_adult
       }
     });

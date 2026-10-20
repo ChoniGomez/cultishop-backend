@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { ADMIN_EMAIL } from '../config/initDb';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cultishop_secret_jwt_token_2026';
 
@@ -63,7 +62,7 @@ export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
       } else {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-        const role = clientEmail === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
+        const role = 'consumidor';
 
         const newUserResult = await pool.query(`
           INSERT INTO users (name, email, password, role, is_adult, is_verified)

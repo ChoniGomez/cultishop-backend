@@ -6,8 +6,6 @@ export const ADMIN_DEFAULT_PASSWORD = '15525503pololo';
 
 export async function initDb() {
   try {
-    console.log('Inicializando verificaciones de esquema y usuario administrador...');
-
     // 1. Asegurar rol por defecto consumidor en la tabla users
     await pool.query(`
       ALTER TABLE users ALTER COLUMN role SET DEFAULT 'consumidor';
@@ -125,8 +123,21 @@ export async function initDb() {
           true
         );
       `);
-      console.log('✅ Banners publicitarios iniciales configurados en la base de datos');
     }
+
+    // 3.1b Asegurar tabla de configuración de tienda (settings: pagos, alias, datos comerciales)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO settings (key, value) VALUES (
+        'payment',
+        '{"bank_alias": "CULTISHOP.POSADAS", "bank_cbu": "", "bank_name": "Mercado Pago / Billeteras Virtuales", "account_holder": "CultiShop Posadas", "payment_notes": "Al confirmar el pedido podrás enviar el comprobante de transferencia directamente por WhatsApp."}'::jsonb
+      ) ON CONFLICT (key) DO NOTHING;
+    `);
 
     // 3.2 Asegurar categorías y subcategorías oficiales en la base de datos
     await pool.query(`
@@ -249,31 +260,22 @@ export async function initDb() {
       ON CONFLICT (slug) DO NOTHING;
     `);
 
-    // 4. Sembrar o actualizar usuario Administrador oficial
+    // 4. Sembrar cuenta de administrador inicial únicamente si no existe ningún admin en la BD
     const adminCheck = await pool.query(
-      'SELECT id, email, role FROM users WHERE LOWER(email) = $1',
-      [ADMIN_EMAIL.toLowerCase()]
+      "SELECT id FROM users WHERE role = 'admin' LIMIT 1"
     );
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(ADMIN_DEFAULT_PASSWORD, salt);
-
     if (adminCheck.rows.length === 0) {
+      const initialEmail = process.env.INITIAL_ADMIN_EMAIL || ADMIN_EMAIL;
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(ADMIN_DEFAULT_PASSWORD, salt);
+
       await pool.query(
         `INSERT INTO users (name, email, password, role, is_adult, is_verified)
-         VALUES ($1, $2, $3, 'admin', true, true)`,
-        ['Administrador CultiShop', ADMIN_EMAIL.toLowerCase(), hashedPassword]
+         VALUES ($1, $2, $3, 'admin', true, true)
+         ON CONFLICT (email) DO UPDATE SET role = 'admin'`,
+        ['Administrador CultiShop', initialEmail.toLowerCase(), hashedPassword]
       );
-      console.log(`✅ Usuario Administrador creado exitosamente: ${ADMIN_EMAIL}`);
-    } else {
-      // Aseguramos rol 'admin' y contraseña actualizada
-      await pool.query(
-        `UPDATE users 
-         SET role = 'admin', password = $1, is_adult = true, is_verified = true, updated_at = NOW()
-         WHERE id = $2`,
-        [hashedPassword, adminCheck.rows[0].id]
-      );
-      console.log(`✅ Usuario Administrador verificado y actualizado con rol 'admin': ${ADMIN_EMAIL}`);
     }
 
     // 5. Actualizar imágenes obsoletas en Neon DB hacia fotos temáticas verificadas

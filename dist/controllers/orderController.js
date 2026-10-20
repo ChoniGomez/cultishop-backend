@@ -7,7 +7,6 @@ exports.deleteOrder = exports.updateOrderStatus = exports.getMyOrders = exports.
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = require("../config/database");
-const initDb_1 = require("../config/initDb");
 const JWT_SECRET = process.env.JWT_SECRET || 'cultishop_secret_jwt_token_2026';
 /**
  * Crear un nuevo pedido (realizado por un consumidor o invitado)
@@ -38,7 +37,7 @@ const createOrder = async (req, res) => {
             else {
                 const salt = await bcryptjs_1.default.genSalt(10);
                 const hashedPassword = await bcryptjs_1.default.hash(password, salt);
-                const role = clientEmail === initDb_1.ADMIN_EMAIL.toLowerCase() ? 'admin' : 'consumidor';
+                const role = 'consumidor';
                 const newUserResult = await database_1.pool.query(`
           INSERT INTO users (name, email, password, role, is_adult, is_verified)
           VALUES ($1, $2, $3, $4, true, true)
