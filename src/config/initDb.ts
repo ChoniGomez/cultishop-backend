@@ -161,7 +161,9 @@ export async function initDb() {
       ('Kits', 'kits', 5),
       ('Parafernalia', 'parafernalia', 6),
       ('Sustratos/Macetas', 'sustratos-macetas', 7),
-      ('Semillas', 'semillas', 8)
+      ('Semillas', 'semillas', 8),
+      ('Lavado de Raíces', 'lavado-de-raices', 9),
+      ('Accesorios', 'accesorios', 10)
       ON CONFLICT (slug) DO NOTHING;
 
       -- Subcategorías Fertilizantes

@@ -44,6 +44,25 @@ export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
     const clientEmail = customer_email ? customer_email.trim().toLowerCase() : (req.user?.email || null);
     const clientPhone = phone || whatsapp_phone || null;
 
+    // Restricción de compras para cuentas con rol Administrador
+    if (req.user?.role === 'admin') {
+      return res.status(403).json({
+        error: 'Las cuentas con rol de administrador no pueden registrar compras como clientes. Gestiona las órdenes desde el Panel de Administración.'
+      });
+    }
+
+    if (clientEmail) {
+      const adminEmailCheck = await pool.query(
+        "SELECT id FROM users WHERE LOWER(email) = $1 AND role = 'admin'",
+        [clientEmail]
+      );
+      if (adminEmailCheck.rows.length > 0) {
+        return res.status(403).json({
+          error: 'El correo ingresado pertenece a una cuenta de administrador. Los administradores no pueden realizar compras.'
+        });
+      }
+    }
+
     // Si el usuario marcó "¿Crear una cuenta?" y no está logueado
     if (!userId && create_account && password && clientEmail) {
       if (password.length < 6) {
