@@ -67,10 +67,10 @@ const formatProductRow = (row: any) => {
     subcategoryId = row.category_id;
   }
 
-  const defaultStock = typeof row.stock === 'number' ? row.stock : parseInt(row.stock, 10) || 10;
+  const defaultStock = typeof row.stock === 'number' ? row.stock : parseInt(row.stock, 10) || 0;
   const defaultPrice = typeof row.price === 'number' ? row.price : parseFloat(row.price) || 0;
-  const rawOptions = Array.isArray(row.options) ? row.options : parseJsonField(row.options, ['Estándar']);
-  const formattedOptions = Array.isArray(rawOptions) ? rawOptions.map((opt: any) => {
+  const rawOptions = Array.isArray(row.options) ? row.options : parseJsonField(row.options, []);
+  const formattedOptions = Array.isArray(rawOptions) && rawOptions.length > 0 ? rawOptions.map((opt: any) => {
     if (typeof opt === 'object' && opt !== null) {
       return {
         name: String(opt.name || opt.title || 'Estándar').trim(),
@@ -85,9 +85,19 @@ const formatProductRow = (row: any) => {
     };
   }) : [{ name: 'Estándar', price: defaultPrice, stock: defaultStock }];
 
+  // Calcular precio mínimo, máximo y stock total a partir de las variantes
+  const variantPrices = formattedOptions.map((o: any) => o.price).filter((p: number) => !isNaN(p) && p >= 0);
+  const minPrice = variantPrices.length > 0 ? Math.min(...variantPrices) : defaultPrice;
+  const maxPrice = variantPrices.length > 0 ? Math.max(...variantPrices) : defaultPrice;
+  const totalStock = formattedOptions.reduce((acc: number, o: any) => acc + (Number(o.stock) || 0), 0);
+
   return {
     ...row,
-    price: defaultPrice,
+    price: minPrice,
+    min_price: minPrice,
+    max_price: maxPrice,
+    stock: totalStock,
+    total_stock: totalStock,
     image: row.image_url,
     category: categoryName || 'Varios',
     category_slug: categorySlug || '',
@@ -283,46 +293,50 @@ export const createProduct = async (req: Request, res: Response) => {
       details
     } = req.body;
 
-    if (!title || price === undefined || price === null) {
-      return res.status(400).json({ error: 'Título y precio son obligatorios.' });
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'El título del producto es obligatorio.' });
     }
 
     const finalImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
-    let numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price);
-    const numDiscount = discount_price !== undefined ? Number(discount_price) : null;
-    let numStock = parseInt(stock, 10) || 0;
+    const numDiscount = discount_price !== undefined && discount_price !== null && discount_price !== '' ? Number(discount_price) : null;
 
-    // Normalizar opciones con precio y stock independiente
+    // Normalizar opciones con precio y stock independiente (fuente de verdad obligatoria)
     let normalizedOptions: any[] = [];
     if (Array.isArray(options) && options.length > 0) {
       normalizedOptions = options.map((o: any) => {
         if (typeof o === 'object' && o !== null) {
-          const optName = String(o.name || o.title || 'Estándar').trim();
+          const optName = String(o.name || o.title || '').trim();
           const optPrice = typeof o.price === 'string' ? parseFloat(o.price.replace(/[^0-9.-]/g, '')) || 0 : Number(o.price) || 0;
           const optStock = o.stock !== undefined && o.stock !== null && o.stock !== ''
             ? Math.max(0, parseInt(String(o.stock), 10) || 0)
-            : numStock;
+            : 0;
           return { name: optName, price: optPrice, stock: optStock };
         }
-        return { name: String(o).trim(), price: numPrice, stock: numStock };
+        return { name: String(o).trim(), price: 0, stock: 0 };
       }).filter((o: any) => o.name.length > 0);
     }
 
+    // Si aún se envió con precio legado y sin variantes
     if (normalizedOptions.length === 0) {
-      normalizedOptions = [{ name: 'Estándar', price: numPrice, stock: numStock }];
+      if (price !== undefined && price !== null && price !== '') {
+        const fallbackPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price) || 0;
+        const fallbackStock = parseInt(stock, 10) || 0;
+        normalizedOptions = [{ name: 'Estándar', price: fallbackPrice, stock: fallbackStock }];
+      } else {
+        return res.status(400).json({ error: 'Debes definir al menos una medida o presentación en la tabla con su precio y stock.' });
+      }
     }
 
+    // Calcular automáticamente precio base y stock total a partir de las variantes
     const optionPrices: number[] = normalizedOptions
       .map((o: any) => o.price)
-      .filter((p: number): p is number => !isNaN(p) && p > 0);
-    if (optionPrices.length > 0 && (!numPrice || numPrice === 0)) {
-      numPrice = Math.min(...optionPrices);
-    }
+      .filter((p: number): p is number => !isNaN(p) && p >= 0);
 
+    const calculatedPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : 0;
     const totalVariantStock = normalizedOptions.reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0);
-    if (normalizedOptions.length > 1) {
-      numStock = totalVariantStock;
-    }
+
+    const numPrice = calculatedPrice;
+    const numStock = totalVariantStock;
 
     let finalBadge: string | null = badge !== undefined && badge !== null ? String(badge).trim() : 'STOCK DISPONIBLE';
     if (finalBadge === 'none' || (finalBadge && finalBadge.toLowerCase() === 'sin etiqueta') || finalBadge === '') {
@@ -504,15 +518,13 @@ export const updateProduct = async (req: Request, res: Response) => {
       if (normalizedOptions.length > 0) {
         const optionPrices: number[] = normalizedOptions
           .map((o: any) => o.price)
-          .filter((p: number): p is number => !isNaN(p) && p > 0);
-        if (optionPrices.length > 0 && (!finalPrice || finalPrice === 0)) {
+          .filter((p: number): p is number => !isNaN(p) && p >= 0);
+        if (optionPrices.length > 0) {
           finalPrice = Math.min(...optionPrices);
         }
 
         const totalVariantStock = normalizedOptions.reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0);
-        if (normalizedOptions.length > 1) {
-          finalStock = totalVariantStock;
-        }
+        finalStock = totalVariantStock;
         finalOptionsJson = JSON.stringify(normalizedOptions);
       } else {
         finalOptionsJson = JSON.stringify([{ name: 'Estándar', price: finalPrice, stock: finalStock }]);
@@ -522,6 +534,9 @@ export const updateProduct = async (req: Request, res: Response) => {
     if (finalStock <= 0) {
       finalBadge = 'SIN STOCK';
       finalBadgeType = 'red';
+    } else if (finalBadge === 'SIN STOCK') {
+      finalBadge = 'STOCK DISPONIBLE';
+      finalBadgeType = 'gold';
     }
 
     const finalBrand = brand !== undefined ? brand : current.brand;

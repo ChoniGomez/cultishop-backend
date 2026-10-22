@@ -68,10 +68,10 @@ const formatProductRow = (row) => {
         subcategorySlug = row.category_slug;
         subcategoryId = row.category_id;
     }
-    const defaultStock = typeof row.stock === 'number' ? row.stock : parseInt(row.stock, 10) || 10;
+    const defaultStock = typeof row.stock === 'number' ? row.stock : parseInt(row.stock, 10) || 0;
     const defaultPrice = typeof row.price === 'number' ? row.price : parseFloat(row.price) || 0;
-    const rawOptions = Array.isArray(row.options) ? row.options : parseJsonField(row.options, ['Estándar']);
-    const formattedOptions = Array.isArray(rawOptions) ? rawOptions.map((opt) => {
+    const rawOptions = Array.isArray(row.options) ? row.options : parseJsonField(row.options, []);
+    const formattedOptions = Array.isArray(rawOptions) && rawOptions.length > 0 ? rawOptions.map((opt) => {
         if (typeof opt === 'object' && opt !== null) {
             return {
                 name: String(opt.name || opt.title || 'Estándar').trim(),
@@ -85,9 +85,18 @@ const formatProductRow = (row) => {
             stock: defaultStock
         };
     }) : [{ name: 'Estándar', price: defaultPrice, stock: defaultStock }];
+    // Calcular precio mínimo, máximo y stock total a partir de las variantes
+    const variantPrices = formattedOptions.map((o) => o.price).filter((p) => !isNaN(p) && p >= 0);
+    const minPrice = variantPrices.length > 0 ? Math.min(...variantPrices) : defaultPrice;
+    const maxPrice = variantPrices.length > 0 ? Math.max(...variantPrices) : defaultPrice;
+    const totalStock = formattedOptions.reduce((acc, o) => acc + (Number(o.stock) || 0), 0);
     return {
         ...row,
-        price: defaultPrice,
+        price: minPrice,
+        min_price: minPrice,
+        max_price: maxPrice,
+        stock: totalStock,
+        total_stock: totalStock,
         image: row.image_url,
         category: categoryName || 'Varios',
         category_slug: categorySlug || '',
@@ -230,41 +239,45 @@ const resolveCategories = async (category_id, category, subcategory_id, subcateg
 const createProduct = async (req, res) => {
     try {
         const { title, description, price, discount_price, stock = 10, image_url, image, category, category_id, subcategory, subcategory_id, badge = 'STOCK DISPONIBLE', badge_type = 'gold', options = ['Estándar'], brand, origin, format, cultivation_stage, dosage, ph_recommended, ec_recommended, suitable_for, key_benefits, application_guide, cannabis_specs, shipping_info, details } = req.body;
-        if (!title || price === undefined || price === null) {
-            return res.status(400).json({ error: 'Título y precio son obligatorios.' });
+        if (!title || !String(title).trim()) {
+            return res.status(400).json({ error: 'El título del producto es obligatorio.' });
         }
         const finalImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
-        let numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price);
-        const numDiscount = discount_price !== undefined ? Number(discount_price) : null;
-        let numStock = parseInt(stock, 10) || 0;
-        // Normalizar opciones con precio y stock independiente
+        const numDiscount = discount_price !== undefined && discount_price !== null && discount_price !== '' ? Number(discount_price) : null;
+        // Normalizar opciones con precio y stock independiente (fuente de verdad obligatoria)
         let normalizedOptions = [];
         if (Array.isArray(options) && options.length > 0) {
             normalizedOptions = options.map((o) => {
                 if (typeof o === 'object' && o !== null) {
-                    const optName = String(o.name || o.title || 'Estándar').trim();
+                    const optName = String(o.name || o.title || '').trim();
                     const optPrice = typeof o.price === 'string' ? parseFloat(o.price.replace(/[^0-9.-]/g, '')) || 0 : Number(o.price) || 0;
                     const optStock = o.stock !== undefined && o.stock !== null && o.stock !== ''
                         ? Math.max(0, parseInt(String(o.stock), 10) || 0)
-                        : numStock;
+                        : 0;
                     return { name: optName, price: optPrice, stock: optStock };
                 }
-                return { name: String(o).trim(), price: numPrice, stock: numStock };
+                return { name: String(o).trim(), price: 0, stock: 0 };
             }).filter((o) => o.name.length > 0);
         }
+        // Si aún se envió con precio legado y sin variantes
         if (normalizedOptions.length === 0) {
-            normalizedOptions = [{ name: 'Estándar', price: numPrice, stock: numStock }];
+            if (price !== undefined && price !== null && price !== '') {
+                const fallbackPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.-]/g, '')) || 0 : Number(price) || 0;
+                const fallbackStock = parseInt(stock, 10) || 0;
+                normalizedOptions = [{ name: 'Estándar', price: fallbackPrice, stock: fallbackStock }];
+            }
+            else {
+                return res.status(400).json({ error: 'Debes definir al menos una medida o presentación en la tabla con su precio y stock.' });
+            }
         }
+        // Calcular automáticamente precio base y stock total a partir de las variantes
         const optionPrices = normalizedOptions
             .map((o) => o.price)
-            .filter((p) => !isNaN(p) && p > 0);
-        if (optionPrices.length > 0 && (!numPrice || numPrice === 0)) {
-            numPrice = Math.min(...optionPrices);
-        }
+            .filter((p) => !isNaN(p) && p >= 0);
+        const calculatedPrice = optionPrices.length > 0 ? Math.min(...optionPrices) : 0;
         const totalVariantStock = normalizedOptions.reduce((acc, curr) => acc + (curr.stock || 0), 0);
-        if (normalizedOptions.length > 1) {
-            numStock = totalVariantStock;
-        }
+        const numPrice = calculatedPrice;
+        const numStock = totalVariantStock;
         let finalBadge = badge !== undefined && badge !== null ? String(badge).trim() : 'STOCK DISPONIBLE';
         if (finalBadge === 'none' || (finalBadge && finalBadge.toLowerCase() === 'sin etiqueta') || finalBadge === '') {
             finalBadge = null;
@@ -396,14 +409,12 @@ const updateProduct = async (req, res) => {
             if (normalizedOptions.length > 0) {
                 const optionPrices = normalizedOptions
                     .map((o) => o.price)
-                    .filter((p) => !isNaN(p) && p > 0);
-                if (optionPrices.length > 0 && (!finalPrice || finalPrice === 0)) {
+                    .filter((p) => !isNaN(p) && p >= 0);
+                if (optionPrices.length > 0) {
                     finalPrice = Math.min(...optionPrices);
                 }
                 const totalVariantStock = normalizedOptions.reduce((acc, curr) => acc + (curr.stock || 0), 0);
-                if (normalizedOptions.length > 1) {
-                    finalStock = totalVariantStock;
-                }
+                finalStock = totalVariantStock;
                 finalOptionsJson = JSON.stringify(normalizedOptions);
             }
             else {
@@ -413,6 +424,10 @@ const updateProduct = async (req, res) => {
         if (finalStock <= 0) {
             finalBadge = 'SIN STOCK';
             finalBadgeType = 'red';
+        }
+        else if (finalBadge === 'SIN STOCK') {
+            finalBadge = 'STOCK DISPONIBLE';
+            finalBadgeType = 'gold';
         }
         const finalBrand = brand !== undefined ? brand : current.brand;
         const finalOrigin = origin !== undefined ? origin : current.origin;
