@@ -236,6 +236,70 @@ export async function initDb() {
       `);
     }
 
+    // 3.1e Asegurar tabla de Preguntas Frecuentes (faqs)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS faqs (
+        id SERIAL PRIMARY KEY,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        category VARCHAR(100) DEFAULT 'General',
+        order_index INT DEFAULT 0,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Sembrar preguntas frecuentes iniciales si la tabla está vacía
+    const faqCount = await pool.query('SELECT COUNT(*) FROM faqs');
+    if (parseInt(faqCount.rows[0].count, 10) === 0) {
+      await pool.query(`
+        INSERT INTO faqs (question, answer, category, order_index, is_active) VALUES
+        (
+          '¿Cómo realizo una compra y cuáles son los medios de pago?',
+          'Podés armar tu pedido directamente agregando productos al carrito. Aceptamos transferencias bancarias, Mercado Pago, billeteras virtuales y efectivo en nuestro local. Al confirmar tu pedido podés coordinar el pago y la entrega rápidamente por WhatsApp con nuestro equipo.',
+          'Compras & Pagos',
+          1,
+          true
+        ),
+        (
+          '¿Hacen envíos en Posadas y al interior de Misiones o el país?',
+          '¡Sí! Realizamos envíos rápidos en Posadas (cadetería o retiro en tienda) y despachamos encomiendas seguras y embaladas discretamente a toda la provincia de Misiones y a todo el país a través de expresos y empresas de transporte oficial.',
+          'Envíos & Entregas',
+          2,
+          true
+        ),
+        (
+          '¿Dónde queda el local físico y cuáles son los horarios de atención?',
+          'Estamos ubicados en Av. López y Planes 2919, Posadas, Misiones. Te invitamos a visitarnos para conocer todos los productos exhibidos y recibir asesoramiento técnico personalizado para tus cultivos.',
+          'Local & Horarios',
+          3,
+          true
+        ),
+        (
+          '¿Qué fertilizantes y marcas oficiales trabajan?',
+          'Trabajamos únicamente con marcas oficiales y reconocidas por su pureza y eficacia: Namasté Nutrientes, Sanidad Vegetal Mamboretá, Treemix, Mad Grow, Top Crop, sustratos profesionales Grow Mix y Klasmann, iluminación LED de alta eficiencia y parafernalia de primer nivel.',
+          'Cultivo & Insumos',
+          4,
+          true
+        ),
+        (
+          '¿Los insumos son aptos para cultivo medicinal bajo Ley 27.350 (Reprocann)?',
+          'Sí, todos nuestros fertilizantes, sustratos y preventivos orgánicos cumplen con los estándares agronómicos para el cultivo medicinal responsable amparado por el marco regulatorio del Reprocann (Ley 27.350).',
+          'Cultivo & Normativa',
+          5,
+          true
+        ),
+        (
+          '¿Brindan asesoramiento técnico si recién estoy comenzando?',
+          '¡Absolutamente! Nuestro equipo cuenta con amplia experiencia y te acompaña en cada fase: germinación, vegetativo, floración, lavado de raíces y curado. No dudes en consultarnos por WhatsApp o en el local ante cualquier duda sobre plagas, deficiencias o dosificación.',
+          'Asesoramiento',
+          6,
+          true
+        );
+      `);
+    }
+
     // 3.2 Asegurar categorías y subcategorías oficiales en la base de datos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS categories (

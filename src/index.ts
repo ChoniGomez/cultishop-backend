@@ -9,6 +9,7 @@ import bannerRoutes from './routes/bannerRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import aboutRoutes from './routes/aboutRoutes';
 import instagramRoutes from './routes/instagramRoutes';
+import faqRoutes from './routes/faqRoutes';
 import { initDb } from './config/initDb';
 
 dotenv.config();
@@ -32,6 +33,7 @@ app.use('/api/banners', bannerRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/about', aboutRoutes);
 app.use('/api/instagram', instagramRoutes);
+app.use('/api/faqs', faqRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });
