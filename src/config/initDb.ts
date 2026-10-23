@@ -139,6 +139,103 @@ export async function initDb() {
       ) ON CONFLICT (key) DO NOTHING;
     `);
 
+    // 3.1c Asegurar tabla de bloques institucionales "Sobre Nosotros" (about_sections)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS about_sections (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        subtitle VARCHAR(255),
+        content TEXT NOT NULL,
+        image_url TEXT,
+        order_index INT DEFAULT 0,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Sembrar bloques institucionales si la tabla está vacía
+    const aboutCount = await pool.query('SELECT COUNT(*) FROM about_sections');
+    if (parseInt(aboutCount.rows[0].count, 10) === 0) {
+      await pool.query(`
+        INSERT INTO about_sections (title, subtitle, content, image_url, order_index, is_active) VALUES
+        (
+          'Nuestra Historia & Pasión por el Cultivo',
+          'Desde Posadas hacia toda la provincia y región',
+          'CultiShop nació con una misión clara: brindar a la comunidad de cultivadores insumos de máxima pureza, asesoramiento técnico genuino y soluciones reales adaptadas a nuestro clima. Creemos en el autocultivo consciente, responsable y medicinal, promoviendo cosechas de calidad superior con el respaldo de las mejores marcas del mercado nacional e internacional.',
+          'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=1200',
+          1,
+          true
+        ),
+        (
+          'Asesoramiento Técnico & Cercanía',
+          'Acompañamiento en cada etapa de tu ciclo',
+          'Ya sea que estés dando tus primeros pasos con tu primera planta o gestionando salas indoor automatizadas de alta exigencia, te acompañamos en cada fase: germinación, vegetativo, floración y curado. En nuestro local físico en Av. López y Planes 2919 y en nuestros canales digitales encontrás respuestas claras, tablas de nutrición y diagnóstico preventivo de plagas.',
+          'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=1200',
+          2,
+          true
+        ),
+        (
+          'Compromiso con la Calidad y la Ley 27.350',
+          'Insumos certificados para cultivo medicinal',
+          'Trabajamos exclusivamente con líneas oficiales y certificadas como Namasté Nutrientes, Sanidad Vegetal Mamboretá, Treemix, Mad Grow y Top Crop. Apoyamos y fomentamos el marco regulatorio del Reprocann (Ley 27.350), garantizando que cuentes con sustratos libres de patógenos, fertilizantes de grado agronómico y equipamiento de medición de precisión.',
+          'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=1200',
+          3,
+          true
+        );
+      `);
+    }
+
+    // 3.1d Asegurar tabla de videos y publicaciones de Instagram (instagram_videos)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS instagram_videos (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255),
+        post_url TEXT NOT NULL,
+        thumbnail_url TEXT,
+        order_index INT DEFAULT 0,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Sembrar videos/publicaciones de Instagram iniciales si la tabla está vacía
+    const instaCount = await pool.query('SELECT COUNT(*) FROM instagram_videos');
+    if (parseInt(instaCount.rows[0].count, 10) === 0) {
+      await pool.query(`
+        INSERT INTO instagram_videos (title, post_url, thumbnail_url, order_index, is_active) VALUES
+        (
+          'Guía de Nutrición: Cómo usar Oro Negro y Amazonia de Namasté',
+          'https://www.instagram.com/culti.shopp/',
+          'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=800',
+          1,
+          true
+        ),
+        (
+          'Combate definitivo contra trips y arañuela roja con Sanidad Mamboretá',
+          'https://www.instagram.com/culti.shopp/',
+          'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=800',
+          2,
+          true
+        ),
+        (
+          'Montaje de Carpas Indoor e Iluminación LED de Alta Eficiencia',
+          'https://www.instagram.com/culti.shopp/',
+          'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=800',
+          3,
+          true
+        ),
+        (
+          'Recorrido por nuestro local oficial en Posadas • Av. López y Planes 2919',
+          'https://www.instagram.com/culti.shopp/',
+          'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=800',
+          4,
+          true
+        );
+      `);
+    }
+
     // 3.2 Asegurar categorías y subcategorías oficiales en la base de datos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS categories (
