@@ -137,6 +137,11 @@ async function initDb() {
         'payment',
         '{"bank_alias": "CULTISHOP.POSADAS", "bank_cbu": "", "bank_name": "Mercado Pago / Billeteras Virtuales", "account_holder": "CultiShop Posadas", "payment_notes": "Al confirmar el pedido podrás enviar el comprobante de transferencia directamente por WhatsApp."}'::jsonb
       ) ON CONFLICT (key) DO NOTHING;
+
+      INSERT INTO settings (key, value) VALUES (
+        'location',
+        '{"store_address": "Av. López y Planes 2919 (entre Lavalle y Santa Catalina)", "store_city": "Posadas, Misiones", "store_hours": "Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs", "store_phone": "+54 9 376 435-6995", "google_maps_url": "https://maps.google.com/?q=Av.+López+y+Planes+2919,+Posadas", "google_maps_embed_url": "https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed"}'::jsonb
+      ) ON CONFLICT (key) DO NOTHING;
     `);
         // 3.1c Asegurar tabla de bloques institucionales "Sobre Nosotros" (about_sections)
         await database_1.pool.query(`

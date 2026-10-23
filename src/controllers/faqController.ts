@@ -298,3 +298,4 @@ export const toggleFaqActive = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Error al alternar estado de la pregunta frecuente.' });
   }
 };
+

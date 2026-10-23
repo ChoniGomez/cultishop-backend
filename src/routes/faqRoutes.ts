@@ -28,3 +28,4 @@ router.delete('/:id', requireAuth, requireAdmin, deleteFaq);
 router.get('/:id', getFaqById);
 
 export default router;
+
