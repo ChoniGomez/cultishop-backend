@@ -10,7 +10,7 @@ export interface PaymentSettings {
   payment_notes: string;
 }
 
-const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
+export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
   bank_alias: 'CULTISHOP.POSADAS',
   bank_cbu: '',
   bank_name: 'Mercado Pago / Billeteras Virtuales',
@@ -19,9 +19,10 @@ const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
 };
 
 /**
- * Obtener configuración de pagos (Público para checkout y visualización)
+ * Obtener la configuración actual de pagos (Alias bancario, CBU, notas).
+ * Endpoint público: GET /api/settings/payment
  */
-export const getPaymentSettings = async (req: Request, res: Response) => {
+export const getPaymentSettings = async (_req: Request, res: Response) => {
   try {
     const result = await pool.query(
       "SELECT value FROM settings WHERE key = 'payment' LIMIT 1"
@@ -42,13 +43,13 @@ export const getPaymentSettings = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error en getPaymentSettings:', error.message);
-    // En caso de error de BD, retornar defaults para no romper el checkout
     return res.json({ payment: DEFAULT_PAYMENT_SETTINGS });
   }
 };
 
 /**
- * Actualizar configuración de pagos (Solo Administrador)
+ * Actualizar la configuración de pagos de la tienda.
+ * Endpoint protegido (Solo Admin): PUT /api/settings/payment
  */
 export const updatePaymentSettings = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -60,7 +61,10 @@ export const updatePaymentSettings = async (req: AuthenticatedRequest, res: Resp
       payment_notes
     } = req.body;
 
-    // Obtener valores actuales o default
+    if (!bank_alias || typeof bank_alias !== 'string' || !bank_alias.trim()) {
+      return res.status(400).json({ error: 'El Alias bancario es obligatorio.' });
+    }
+
     const currentRes = await pool.query(
       "SELECT value FROM settings WHERE key = 'payment' LIMIT 1"
     );
@@ -75,7 +79,7 @@ export const updatePaymentSettings = async (req: AuthenticatedRequest, res: Resp
     }
 
     const updatedPayment: PaymentSettings = {
-      bank_alias: typeof bank_alias === 'string' ? bank_alias.trim().toUpperCase() : currentSettings.bank_alias,
+      bank_alias: bank_alias.trim().toUpperCase(),
       bank_cbu: typeof bank_cbu === 'string' ? bank_cbu.trim() : currentSettings.bank_cbu,
       bank_name: typeof bank_name === 'string' ? bank_name.trim() : currentSettings.bank_name,
       account_holder: typeof account_holder === 'string' ? account_holder.trim() : currentSettings.account_holder,
@@ -103,7 +107,6 @@ export const updatePaymentSettings = async (req: AuthenticatedRequest, res: Resp
   }
 };
 
-
 export interface LocationSettings {
   store_address: string;
   store_city: string;
@@ -111,6 +114,9 @@ export interface LocationSettings {
   store_phone: string;
   google_maps_url: string;
   google_maps_embed_url: string;
+  address?: string;
+  hours?: string;
+  phone?: string;
 }
 
 export const DEFAULT_LOCATION_SETTINGS: LocationSettings = {
@@ -119,7 +125,10 @@ export const DEFAULT_LOCATION_SETTINGS: LocationSettings = {
   store_hours: 'Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs',
   store_phone: '+54 9 376 435-6995',
   google_maps_url: 'https://maps.google.com/?q=Av.+López+y+Planes+2919,+Posadas',
-  google_maps_embed_url: 'https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed'
+  google_maps_embed_url: 'https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed',
+  address: 'Av. López y Planes 2919 (entre Lavalle y Santa Catalina), Posadas, Misiones, Argentina',
+  hours: 'Lunes a Sábados de 9:00 a 13:00 y de 16:30 a 20:30 hs',
+  phone: '+54 9 376 435-6995'
 };
 
 export const sanitizeGoogleMapsEmbedUrl = (raw: string): string => {
@@ -132,7 +141,7 @@ export const sanitizeGoogleMapsEmbedUrl = (raw: string): string => {
   return trimmed;
 };
 
-export const getLocationSettings = async (req: Request, res: Response) => {
+export const getLocationSettings = async (_req: Request, res: Response) => {
   try {
     const result = await pool.query(
       "SELECT value FROM settings WHERE key = 'location' LIMIT 1"
@@ -145,14 +154,21 @@ export const getLocationSettings = async (req: Request, res: Response) => {
     const value = result.rows[0].value;
     const location = typeof value === 'string' ? JSON.parse(value) : value;
 
-    return res.json({
-      location: {
-        ...DEFAULT_LOCATION_SETTINGS,
-        ...location
-      }
-    });
+    const merged = {
+      ...DEFAULT_LOCATION_SETTINGS,
+      ...location
+    };
+
+    merged.address = location.address || location.store_address || DEFAULT_LOCATION_SETTINGS.address;
+    merged.store_address = location.store_address || location.address || DEFAULT_LOCATION_SETTINGS.store_address;
+    merged.hours = location.hours || location.store_hours || DEFAULT_LOCATION_SETTINGS.hours;
+    merged.store_hours = location.store_hours || location.hours || DEFAULT_LOCATION_SETTINGS.store_hours;
+    merged.phone = location.phone || location.store_phone || DEFAULT_LOCATION_SETTINGS.phone;
+    merged.store_phone = location.store_phone || location.phone || DEFAULT_LOCATION_SETTINGS.store_phone;
+
+    return res.json({ location: merged });
   } catch (error: any) {
-    console.error('Error en getLocationSettings:', error.message);
+    console.warn('Recuperando en getLocationSettings con valores por defecto:', error.message);
     return res.json({ location: DEFAULT_LOCATION_SETTINGS });
   }
 };
@@ -161,9 +177,12 @@ export const updateLocationSettings = async (req: AuthenticatedRequest, res: Res
   try {
     const {
       store_address,
+      address,
       store_city,
       store_hours,
+      hours,
       store_phone,
+      phone,
       google_maps_url,
       google_maps_embed_url
     } = req.body;
@@ -185,11 +204,26 @@ export const updateLocationSettings = async (req: AuthenticatedRequest, res: Res
       ? sanitizeGoogleMapsEmbedUrl(google_maps_embed_url)
       : currentSettings.google_maps_embed_url;
 
+    const finalAddress = typeof address === 'string' && address.trim()
+      ? address.trim()
+      : (typeof store_address === 'string' && store_address.trim() ? store_address.trim() : currentSettings.store_address);
+
+    const finalHours = typeof hours === 'string' && hours.trim()
+      ? hours.trim()
+      : (typeof store_hours === 'string' && store_hours.trim() ? store_hours.trim() : currentSettings.store_hours);
+
+    const finalPhone = typeof phone === 'string' && phone.trim()
+      ? phone.trim()
+      : (typeof store_phone === 'string' && store_phone.trim() ? store_phone.trim() : currentSettings.store_phone);
+
     const updatedLocation: LocationSettings = {
-      store_address: typeof store_address === 'string' && store_address.trim() ? store_address.trim() : currentSettings.store_address,
+      store_address: finalAddress,
+      address: finalAddress,
       store_city: typeof store_city === 'string' && store_city.trim() ? store_city.trim() : currentSettings.store_city,
-      store_hours: typeof store_hours === 'string' && store_hours.trim() ? store_hours.trim() : currentSettings.store_hours,
-      store_phone: typeof store_phone === 'string' && store_phone.trim() ? store_phone.trim() : currentSettings.store_phone,
+      store_hours: finalHours,
+      hours: finalHours,
+      store_phone: finalPhone,
+      phone: finalPhone,
       google_maps_url: typeof google_maps_url === 'string' && google_maps_url.trim() ? google_maps_url.trim() : currentSettings.google_maps_url,
       google_maps_embed_url: sanitizedEmbedUrl
     };

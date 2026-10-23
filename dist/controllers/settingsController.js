@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateLocationSettings = exports.getLocationSettings = exports.sanitizeGoogleMapsEmbedUrl = exports.DEFAULT_LOCATION_SETTINGS = exports.updatePaymentSettings = exports.getPaymentSettings = void 0;
+exports.updateLocationSettings = exports.getLocationSettings = exports.sanitizeGoogleMapsEmbedUrl = exports.DEFAULT_LOCATION_SETTINGS = exports.updatePaymentSettings = exports.getPaymentSettings = exports.DEFAULT_PAYMENT_SETTINGS = void 0;
 const database_1 = require("../config/database");
-const DEFAULT_PAYMENT_SETTINGS = {
+exports.DEFAULT_PAYMENT_SETTINGS = {
     bank_alias: 'CULTISHOP.POSADAS',
     bank_cbu: '',
     bank_name: 'Mercado Pago / Billeteras Virtuales',
@@ -10,48 +10,51 @@ const DEFAULT_PAYMENT_SETTINGS = {
     payment_notes: 'Al confirmar el pedido podrás enviar el comprobante de transferencia directamente por WhatsApp.'
 };
 /**
- * Obtener configuración de pagos (Público para checkout y visualización)
+ * Obtener la configuración actual de pagos (Alias bancario, CBU, notas).
+ * Endpoint público: GET /api/settings/payment
  */
-const getPaymentSettings = async (req, res) => {
+const getPaymentSettings = async (_req, res) => {
     try {
         const result = await database_1.pool.query("SELECT value FROM settings WHERE key = 'payment' LIMIT 1");
         if (result.rows.length === 0) {
-            return res.json({ payment: DEFAULT_PAYMENT_SETTINGS });
+            return res.json({ payment: exports.DEFAULT_PAYMENT_SETTINGS });
         }
         const value = result.rows[0].value;
         const payment = typeof value === 'string' ? JSON.parse(value) : value;
         return res.json({
             payment: {
-                ...DEFAULT_PAYMENT_SETTINGS,
+                ...exports.DEFAULT_PAYMENT_SETTINGS,
                 ...payment
             }
         });
     }
     catch (error) {
         console.error('Error en getPaymentSettings:', error.message);
-        // En caso de error de BD, retornar defaults para no romper el checkout
-        return res.json({ payment: DEFAULT_PAYMENT_SETTINGS });
+        return res.json({ payment: exports.DEFAULT_PAYMENT_SETTINGS });
     }
 };
 exports.getPaymentSettings = getPaymentSettings;
 /**
- * Actualizar configuración de pagos (Solo Administrador)
+ * Actualizar la configuración de pagos de la tienda.
+ * Endpoint protegido (Solo Admin): PUT /api/settings/payment
  */
 const updatePaymentSettings = async (req, res) => {
     try {
         const { bank_alias, bank_cbu, bank_name, account_holder, payment_notes } = req.body;
-        // Obtener valores actuales o default
+        if (!bank_alias || typeof bank_alias !== 'string' || !bank_alias.trim()) {
+            return res.status(400).json({ error: 'El Alias bancario es obligatorio.' });
+        }
         const currentRes = await database_1.pool.query("SELECT value FROM settings WHERE key = 'payment' LIMIT 1");
-        let currentSettings = DEFAULT_PAYMENT_SETTINGS;
+        let currentSettings = exports.DEFAULT_PAYMENT_SETTINGS;
         if (currentRes.rows.length > 0) {
             const val = currentRes.rows[0].value;
             currentSettings = {
-                ...DEFAULT_PAYMENT_SETTINGS,
+                ...exports.DEFAULT_PAYMENT_SETTINGS,
                 ...(typeof val === 'string' ? JSON.parse(val) : val)
             };
         }
         const updatedPayment = {
-            bank_alias: typeof bank_alias === 'string' ? bank_alias.trim().toUpperCase() : currentSettings.bank_alias,
+            bank_alias: bank_alias.trim().toUpperCase(),
             bank_cbu: typeof bank_cbu === 'string' ? bank_cbu.trim() : currentSettings.bank_cbu,
             bank_name: typeof bank_name === 'string' ? bank_name.trim() : currentSettings.bank_name,
             account_holder: typeof account_holder === 'string' ? account_holder.trim() : currentSettings.account_holder,
@@ -83,7 +86,10 @@ exports.DEFAULT_LOCATION_SETTINGS = {
     store_hours: 'Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs',
     store_phone: '+54 9 376 435-6995',
     google_maps_url: 'https://maps.google.com/?q=Av.+López+y+Planes+2919,+Posadas',
-    google_maps_embed_url: 'https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed'
+    google_maps_embed_url: 'https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed',
+    address: 'Av. López y Planes 2919 (entre Lavalle y Santa Catalina), Posadas, Misiones, Argentina',
+    hours: 'Lunes a Sábados de 9:00 a 13:00 y de 16:30 a 20:30 hs',
+    phone: '+54 9 376 435-6995'
 };
 const sanitizeGoogleMapsEmbedUrl = (raw) => {
     if (!raw || typeof raw !== 'string')
@@ -96,7 +102,7 @@ const sanitizeGoogleMapsEmbedUrl = (raw) => {
     return trimmed;
 };
 exports.sanitizeGoogleMapsEmbedUrl = sanitizeGoogleMapsEmbedUrl;
-const getLocationSettings = async (req, res) => {
+const getLocationSettings = async (_req, res) => {
     try {
         const result = await database_1.pool.query("SELECT value FROM settings WHERE key = 'location' LIMIT 1");
         if (result.rows.length === 0) {
@@ -104,22 +110,27 @@ const getLocationSettings = async (req, res) => {
         }
         const value = result.rows[0].value;
         const location = typeof value === 'string' ? JSON.parse(value) : value;
-        return res.json({
-            location: {
-                ...exports.DEFAULT_LOCATION_SETTINGS,
-                ...location
-            }
-        });
+        const merged = {
+            ...exports.DEFAULT_LOCATION_SETTINGS,
+            ...location
+        };
+        merged.address = location.address || location.store_address || exports.DEFAULT_LOCATION_SETTINGS.address;
+        merged.store_address = location.store_address || location.address || exports.DEFAULT_LOCATION_SETTINGS.store_address;
+        merged.hours = location.hours || location.store_hours || exports.DEFAULT_LOCATION_SETTINGS.hours;
+        merged.store_hours = location.store_hours || location.hours || exports.DEFAULT_LOCATION_SETTINGS.store_hours;
+        merged.phone = location.phone || location.store_phone || exports.DEFAULT_LOCATION_SETTINGS.phone;
+        merged.store_phone = location.store_phone || location.phone || exports.DEFAULT_LOCATION_SETTINGS.store_phone;
+        return res.json({ location: merged });
     }
     catch (error) {
-        console.error('Error en getLocationSettings:', error.message);
+        console.warn('Recuperando en getLocationSettings con valores por defecto:', error.message);
         return res.json({ location: exports.DEFAULT_LOCATION_SETTINGS });
     }
 };
 exports.getLocationSettings = getLocationSettings;
 const updateLocationSettings = async (req, res) => {
     try {
-        const { store_address, store_city, store_hours, store_phone, google_maps_url, google_maps_embed_url } = req.body;
+        const { store_address, address, store_city, store_hours, hours, store_phone, phone, google_maps_url, google_maps_embed_url } = req.body;
         const currentRes = await database_1.pool.query("SELECT value FROM settings WHERE key = 'location' LIMIT 1");
         let currentSettings = exports.DEFAULT_LOCATION_SETTINGS;
         if (currentRes.rows.length > 0) {
@@ -132,11 +143,23 @@ const updateLocationSettings = async (req, res) => {
         const sanitizedEmbedUrl = google_maps_embed_url !== undefined
             ? (0, exports.sanitizeGoogleMapsEmbedUrl)(google_maps_embed_url)
             : currentSettings.google_maps_embed_url;
+        const finalAddress = typeof address === 'string' && address.trim()
+            ? address.trim()
+            : (typeof store_address === 'string' && store_address.trim() ? store_address.trim() : currentSettings.store_address);
+        const finalHours = typeof hours === 'string' && hours.trim()
+            ? hours.trim()
+            : (typeof store_hours === 'string' && store_hours.trim() ? store_hours.trim() : currentSettings.store_hours);
+        const finalPhone = typeof phone === 'string' && phone.trim()
+            ? phone.trim()
+            : (typeof store_phone === 'string' && store_phone.trim() ? store_phone.trim() : currentSettings.store_phone);
         const updatedLocation = {
-            store_address: typeof store_address === 'string' && store_address.trim() ? store_address.trim() : currentSettings.store_address,
+            store_address: finalAddress,
+            address: finalAddress,
             store_city: typeof store_city === 'string' && store_city.trim() ? store_city.trim() : currentSettings.store_city,
-            store_hours: typeof store_hours === 'string' && store_hours.trim() ? store_hours.trim() : currentSettings.store_hours,
-            store_phone: typeof store_phone === 'string' && store_phone.trim() ? store_phone.trim() : currentSettings.store_phone,
+            store_hours: finalHours,
+            hours: finalHours,
+            store_phone: finalPhone,
+            phone: finalPhone,
             google_maps_url: typeof google_maps_url === 'string' && google_maps_url.trim() ? google_maps_url.trim() : currentSettings.google_maps_url,
             google_maps_embed_url: sanitizedEmbedUrl
         };
