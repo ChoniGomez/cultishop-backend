@@ -7,16 +7,28 @@ exports.ADMIN_DEFAULT_PASSWORD = exports.ADMIN_EMAIL = void 0;
 exports.initDb = initDb;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("./database");
+const aboutController_1 = require("../controllers/aboutController");
+const instagramController_1 = require("../controllers/instagramController");
 exports.ADMIN_EMAIL = 'chonidacharygomez@gmail.com';
 exports.ADMIN_DEFAULT_PASSWORD = '15525503pololo';
-async function initDb() {
+async function safeStep(stepName, action) {
     try {
-        // 1. Asegurar rol por defecto consumidor en la tabla users
+        await action();
+    }
+    catch (err) {
+        console.warn(`[initDb] Paso "${stepName}" continuó con aviso:`, err?.message || err);
+    }
+}
+async function initDb() {
+    // 1. Asegurar rol por defecto consumidor en la tabla users
+    await safeStep('users_role', async () => {
         await database_1.pool.query(`
       ALTER TABLE users ALTER COLUMN role SET DEFAULT 'consumidor';
       UPDATE users SET role = 'consumidor' WHERE role = 'customer' OR role IS NULL;
     `);
-        // 2. Asegurar columnas en orders para checkout y envíos
+    });
+    // 2. Asegurar columnas en orders para checkout y envíos
+    await safeStep('orders_schema', async () => {
         await database_1.pool.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
@@ -44,7 +56,9 @@ async function initDb() {
       );
       ALTER TABLE order_items ADD COLUMN IF NOT EXISTS selected_option VARCHAR(100);
     `);
-        // 3. Asegurar columnas en products (incluyendo subcategorías y pestañas de información detallada)
+    });
+    // 3. Asegurar columnas en products (incluyendo subcategorías y pestañas de información detallada)
+    await safeStep('products_schema', async () => {
         await database_1.pool.query(`
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge VARCHAR(50);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20) DEFAULT 'gold';
@@ -65,7 +79,9 @@ async function initDb() {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS details JSONB;
       CREATE INDEX IF NOT EXISTS idx_products_subcategory_id ON products(subcategory_id);
     `);
-        // 3.1 Asegurar tabla de banners publicitarios (Hero Carousel)
+    });
+    // 3.1 Asegurar tabla de banners publicitarios (Hero Carousel)
+    await safeStep('banners_schema', async () => {
         await database_1.pool.query(`
       CREATE TABLE IF NOT EXISTS banners (
         id SERIAL PRIMARY KEY,
@@ -125,7 +141,9 @@ async function initDb() {
         );
       `);
         }
-        // 3.1b Asegurar tabla de configuración de tienda (settings: pagos, alias, datos comerciales)
+    });
+    // 3.1b Asegurar tabla de configuración de tienda (settings: pagos, ubicación, mapa)
+    await safeStep('settings_schema', async () => {
         await database_1.pool.query(`
       CREATE TABLE IF NOT EXISTS settings (
         key VARCHAR(100) PRIMARY KEY,
@@ -143,100 +161,17 @@ async function initDb() {
         '{"store_address": "Av. López y Planes 2919 (entre Lavalle y Santa Catalina)", "store_city": "Posadas, Misiones", "store_hours": "Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs", "store_phone": "+54 9 376 435-6995", "google_maps_url": "https://maps.google.com/?q=Av.+López+y+Planes+2919,+Posadas", "google_maps_embed_url": "https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed"}'::jsonb
       ) ON CONFLICT (key) DO NOTHING;
     `);
-        // 3.1c Asegurar tabla de bloques institucionales "Sobre Nosotros" (about_sections)
-        await database_1.pool.query(`
-      CREATE TABLE IF NOT EXISTS about_sections (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        subtitle VARCHAR(255),
-        content TEXT NOT NULL,
-        image_url TEXT,
-        order_index INT DEFAULT 0,
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-        // Sembrar bloques institucionales si la tabla está vacía
-        const aboutCount = await database_1.pool.query('SELECT COUNT(*) FROM about_sections');
-        if (parseInt(aboutCount.rows[0].count, 10) === 0) {
-            await database_1.pool.query(`
-        INSERT INTO about_sections (title, subtitle, content, image_url, order_index, is_active) VALUES
-        (
-          'Nuestra Historia & Pasión por el Cultivo',
-          'Desde Posadas hacia toda la provincia y región',
-          'CultiShop nació con una misión clara: brindar a la comunidad de cultivadores insumos de máxima pureza, asesoramiento técnico genuino y soluciones reales adaptadas a nuestro clima. Creemos en el autocultivo consciente, responsable y medicinal, promoviendo cosechas de calidad superior con el respaldo de las mejores marcas del mercado nacional e internacional.',
-          'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=1200',
-          1,
-          true
-        ),
-        (
-          'Asesoramiento Técnico & Cercanía',
-          'Acompañamiento en cada etapa de tu ciclo',
-          'Ya sea que estés dando tus primeros pasos con tu primera planta o gestionando salas indoor automatizadas de alta exigencia, te acompañamos en cada fase: germinación, vegetativo, floración y curado. En nuestro local físico en Av. López y Planes 2919 y en nuestros canales digitales encontrás respuestas claras, tablas de nutrición y diagnóstico preventivo de plagas.',
-          'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=1200',
-          2,
-          true
-        ),
-        (
-          'Compromiso con la Calidad y la Ley 27.350',
-          'Insumos certificados para cultivo medicinal',
-          'Trabajamos exclusivamente con líneas oficiales y certificadas como Namasté Nutrientes, Sanidad Vegetal Mamboretá, Treemix, Mad Grow y Top Crop. Apoyamos y fomentamos el marco regulatorio del Reprocann (Ley 27.350), garantizando que cuentes con sustratos libres de patógenos, fertilizantes de grado agronómico y equipamiento de medición de precisión.',
-          'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=1200',
-          3,
-          true
-        );
-      `);
-        }
-        // 3.1d Asegurar tabla de videos y publicaciones de Instagram (instagram_videos)
-        await database_1.pool.query(`
-      CREATE TABLE IF NOT EXISTS instagram_videos (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255),
-        post_url TEXT NOT NULL,
-        thumbnail_url TEXT,
-        order_index INT DEFAULT 0,
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-        // Sembrar videos/publicaciones de Instagram iniciales si la tabla está vacía
-        const instaCount = await database_1.pool.query('SELECT COUNT(*) FROM instagram_videos');
-        if (parseInt(instaCount.rows[0].count, 10) === 0) {
-            await database_1.pool.query(`
-        INSERT INTO instagram_videos (title, post_url, thumbnail_url, order_index, is_active) VALUES
-        (
-          'Guía de Nutrición: Cómo usar Oro Negro y Amazonia de Namasté',
-          'https://www.instagram.com/culti.shopp/',
-          'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=800',
-          1,
-          true
-        ),
-        (
-          'Combate definitivo contra trips y arañuela roja con Sanidad Mamboretá',
-          'https://www.instagram.com/culti.shopp/',
-          'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=800',
-          2,
-          true
-        ),
-        (
-          'Montaje de Carpas Indoor e Iluminación LED de Alta Eficiencia',
-          'https://www.instagram.com/culti.shopp/',
-          'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=800',
-          3,
-          true
-        ),
-        (
-          'Recorrido por nuestro local oficial en Posadas • Av. López y Planes 2919',
-          'https://www.instagram.com/culti.shopp/',
-          'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=800',
-          4,
-          true
-        );
-      `);
-        }
-        // 3.1e Asegurar tabla de Preguntas Frecuentes (faqs)
+    });
+    // 3.1c Asegurar tabla de bloques institucionales "Sobre Nosotros" (about_sections)
+    await safeStep('about_sections_schema', async () => {
+        await (0, aboutController_1.seedDefaultAboutSections)();
+    });
+    // 3.1d Asegurar tabla de videos y publicaciones de Instagram (instagram_videos)
+    await safeStep('instagram_videos_schema', async () => {
+        await (0, instagramController_1.seedDefaultInstagramVideos)();
+    });
+    // 3.1e Asegurar tabla de Preguntas Frecuentes (faqs)
+    await safeStep('faqs_schema', async () => {
         await database_1.pool.query(`
       CREATE TABLE IF NOT EXISTS faqs (
         id SERIAL PRIMARY KEY,
@@ -298,7 +233,9 @@ async function initDb() {
         );
       `);
         }
-        // 3.2 Asegurar categorías y subcategorías oficiales en la base de datos
+    });
+    // 3.2 Asegurar categorías y subcategorías oficiales en la base de datos
+    await safeStep('categories_schema', async () => {
         await database_1.pool.query(`
       CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
@@ -435,7 +372,9 @@ async function initDb() {
       SELECT id, 'Sustratos', 'sustratos', 3 FROM categories WHERE slug = 'sustratos-macetas'
       ON CONFLICT (slug) DO NOTHING;
     `);
-        // 4. Sembrar cuenta de administrador inicial únicamente si no existe ningún admin en la BD
+    });
+    // 4. Sembrar cuenta de administrador inicial únicamente si no existe ningún admin en la BD
+    await safeStep('admin_user', async () => {
         const adminCheck = await database_1.pool.query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
         if (adminCheck.rows.length === 0) {
             const initialEmail = process.env.INITIAL_ADMIN_EMAIL || exports.ADMIN_EMAIL;
@@ -445,7 +384,9 @@ async function initDb() {
          VALUES ($1, $2, $3, 'admin', true, true)
          ON CONFLICT (email) DO UPDATE SET role = 'admin'`, ['Administrador CultiShop', initialEmail.toLowerCase(), hashedPassword]);
         }
-        // 5. Actualizar imágenes obsoletas en Neon DB hacia fotos temáticas verificadas
+    });
+    // 5. Actualizar imágenes obsoletas en Neon DB hacia fotos temáticas verificadas
+    await safeStep('default_images', async () => {
         const defaultCannabisImages = {
             1: 'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=600',
             2: 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=600',
@@ -476,8 +417,5 @@ async function initDb() {
            image_url IS NULL
          )`, [imgUrl, prodId]);
         }
-    }
-    catch (err) {
-        console.error('Advertencia al inicializar esquema y admin en la BD:', err.message);
-    }
+    });
 }

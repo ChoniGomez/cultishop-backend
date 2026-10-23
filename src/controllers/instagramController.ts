@@ -2,50 +2,157 @@ import { Request, Response } from 'express';
 import { pool } from '../config/database';
 
 /**
+ * Publicaciones y videos de Instagram por defecto (respaldo de contingencia)
+ */
+export const DEFAULT_INSTAGRAM_VIDEOS = [
+  {
+    id: 1,
+    title: 'Guía de Nutrición: Cómo usar Oro Negro y Amazonia de Namasté',
+    post_url: 'https://www.instagram.com/culti.shopp/',
+    thumbnail_url: 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=800',
+    order_index: 1,
+    is_active: true
+  },
+  {
+    id: 2,
+    title: 'Combate definitivo contra trips y arañuela roja con Sanidad Mamboretá',
+    post_url: 'https://www.instagram.com/culti.shopp/',
+    thumbnail_url: 'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=800',
+    order_index: 2,
+    is_active: true
+  },
+  {
+    id: 3,
+    title: 'Montaje de Carpas Indoor e Iluminación LED de Alta Eficiencia',
+    post_url: 'https://www.instagram.com/culti.shopp/',
+    thumbnail_url: 'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=800',
+    order_index: 3,
+    is_active: true
+  },
+  {
+    id: 4,
+    title: 'Recorrido por nuestro local oficial en Posadas • Av. López y Planes 2919',
+    post_url: 'https://www.instagram.com/culti.shopp/',
+    thumbnail_url: 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=800',
+    order_index: 4,
+    is_active: true
+  }
+];
+
+/**
+ * Garantiza que la tabla instagram_videos exista en Neon DB
+ */
+export const ensureInstagramTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS instagram_videos (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255),
+      post_url TEXT NOT NULL,
+      thumbnail_url TEXT,
+      order_index INT DEFAULT 0,
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+};
+
+/**
+ * Siembra los videos iniciales de Instagram si la tabla está vacía
+ */
+export const seedDefaultInstagramVideos = async () => {
+  try {
+    await ensureInstagramTable();
+    const countRes = await pool.query('SELECT COUNT(*) FROM instagram_videos');
+    const count = parseInt(countRes.rows[0]?.count || '0', 10);
+    if (count === 0) {
+      for (const item of DEFAULT_INSTAGRAM_VIDEOS) {
+        await pool.query(
+          `INSERT INTO instagram_videos (title, post_url, thumbnail_url, order_index, is_active)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [item.title, item.post_url, item.thumbnail_url, item.order_index, item.is_active]
+        );
+      }
+    }
+  } catch (err: any) {
+    console.warn('Aviso en seedDefaultInstagramVideos:', err?.message || err);
+  }
+};
+
+/**
  * Obtener listado de videos y publicaciones de Instagram activos
  * GET /api/instagram
  */
 export const getActiveInstagramVideos = async (req: Request, res: Response) => {
   try {
     const includeAll = req.query.all === 'true' || req.query.admin === 'true';
-    const query = includeAll
-      ? `
-        SELECT 
-          id,
-          title,
-          post_url,
-          thumbnail_url,
-          order_index,
-          is_active,
-          created_at,
-          updated_at
-        FROM instagram_videos
-        ORDER BY order_index ASC, id ASC
-      `
-      : `
-        SELECT 
-          id,
-          title,
-          post_url,
-          thumbnail_url,
-          order_index,
-          is_active,
-          created_at,
-          updated_at
-        FROM instagram_videos
-        WHERE is_active = true
-        ORDER BY order_index ASC, id ASC
-      `;
+    let rows: any[] = [];
 
-    const result = await pool.query(query);
+    try {
+      const query = includeAll
+        ? `
+          SELECT 
+            id,
+            title,
+            post_url,
+            thumbnail_url,
+            order_index,
+            is_active,
+            created_at,
+            updated_at
+          FROM instagram_videos
+          ORDER BY order_index ASC, id ASC
+        `
+        : `
+          SELECT 
+            id,
+            title,
+            post_url,
+            thumbnail_url,
+            order_index,
+            is_active,
+            created_at,
+            updated_at
+          FROM instagram_videos
+          WHERE is_active = true
+          ORDER BY order_index ASC, id ASC
+        `;
+
+      const result = await pool.query(query);
+      rows = result.rows || [];
+    } catch (queryErr: any) {
+      console.warn('Tabla instagram_videos no disponible, asegurando esquema:', queryErr?.message);
+      await seedDefaultInstagramVideos();
+      const retryRes = await pool.query(
+        includeAll
+          ? `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos ORDER BY order_index ASC, id ASC`
+          : `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos WHERE is_active = true ORDER BY order_index ASC, id ASC`
+      );
+      rows = retryRes.rows || [];
+    }
+
+    if (rows.length === 0) {
+      await seedDefaultInstagramVideos();
+      const retryRes = await pool.query(
+        includeAll
+          ? `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos ORDER BY order_index ASC, id ASC`
+          : `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos WHERE is_active = true ORDER BY order_index ASC, id ASC`
+      );
+      rows = retryRes.rows && retryRes.rows.length > 0 ? retryRes.rows : DEFAULT_INSTAGRAM_VIDEOS;
+    }
 
     return res.json({
-      videos: result.rows,
-      data: result.rows
+      videos: rows,
+      data: rows
     });
   } catch (error: any) {
-    console.error('Error en getActiveInstagramVideos:', error);
-    return res.status(500).json({ error: 'Error al obtener videos de Instagram.' });
+    console.error('Recuperando de error en getActiveInstagramVideos (retornando respaldo):', error?.message || error);
+    // Jamás responder con 500 para evitar pantalla en blanco en la tienda
+    return res.json({
+      videos: DEFAULT_INSTAGRAM_VIDEOS,
+      data: DEFAULT_INSTAGRAM_VIDEOS,
+      fallback: true
+    });
   }
 };
 
@@ -55,27 +162,70 @@ export const getActiveInstagramVideos = async (req: Request, res: Response) => {
  */
 export const getAllInstagramVideosAdmin = async (req: Request, res: Response) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        id,
-        title,
-        post_url,
-        thumbnail_url,
-        order_index,
-        is_active,
-        created_at,
-        updated_at
-      FROM instagram_videos
-      ORDER BY order_index ASC, id ASC
-    `);
+    let rows: any[] = [];
+    try {
+      const result = await pool.query(`
+        SELECT 
+          id,
+          title,
+          post_url,
+          thumbnail_url,
+          order_index,
+          is_active,
+          created_at,
+          updated_at
+        FROM instagram_videos
+        ORDER BY order_index ASC, id ASC
+      `);
+      rows = result.rows || [];
+    } catch (queryErr: any) {
+      console.warn('Tabla instagram_videos no disponible en admin, asegurando esquema:', queryErr?.message);
+      await seedDefaultInstagramVideos();
+      const retryRes = await pool.query(`
+        SELECT 
+          id,
+          title,
+          post_url,
+          thumbnail_url,
+          order_index,
+          is_active,
+          created_at,
+          updated_at
+        FROM instagram_videos
+        ORDER BY order_index ASC, id ASC
+      `);
+      rows = retryRes.rows || [];
+    }
+
+    if (rows.length === 0) {
+      await seedDefaultInstagramVideos();
+      const retryRes = await pool.query(`
+        SELECT 
+          id,
+          title,
+          post_url,
+          thumbnail_url,
+          order_index,
+          is_active,
+          created_at,
+          updated_at
+        FROM instagram_videos
+        ORDER BY order_index ASC, id ASC
+      `);
+      rows = retryRes.rows && retryRes.rows.length > 0 ? retryRes.rows : DEFAULT_INSTAGRAM_VIDEOS;
+    }
 
     return res.json({
-      videos: result.rows,
-      data: result.rows
+      videos: rows,
+      data: rows
     });
   } catch (error: any) {
-    console.error('Error en getAllInstagramVideosAdmin:', error);
-    return res.status(500).json({ error: 'Error al obtener videos de Instagram.' });
+    console.error('Error en getAllInstagramVideosAdmin (retornando respaldo):', error?.message || error);
+    return res.json({
+      videos: DEFAULT_INSTAGRAM_VIDEOS,
+      data: DEFAULT_INSTAGRAM_VIDEOS,
+      fallback: true
+    });
   }
 };
 
@@ -86,12 +236,30 @@ export const getAllInstagramVideosAdmin = async (req: Request, res: Response) =>
 export const getInstagramVideoById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM instagram_videos WHERE id = $1',
-      [parseInt(id, 10)]
-    );
+    const parsedId = parseInt(id, 10);
 
-    if (result.rows.length === 0) {
+    let result;
+    try {
+      result = await pool.query(
+        'SELECT * FROM instagram_videos WHERE id = $1',
+        [parsedId]
+      );
+    } catch (err) {
+      await ensureInstagramTable();
+      result = await pool.query(
+        'SELECT * FROM instagram_videos WHERE id = $1',
+        [parsedId]
+      );
+    }
+
+    if (!result || result.rows.length === 0) {
+      const fallbackItem = DEFAULT_INSTAGRAM_VIDEOS.find(v => v.id === parsedId);
+      if (fallbackItem) {
+        return res.json({
+          video: fallbackItem,
+          data: fallbackItem
+        });
+      }
       return res.status(404).json({ error: 'Video de Instagram no encontrado.' });
     }
 
@@ -111,6 +279,8 @@ export const getInstagramVideoById = async (req: Request, res: Response) => {
  */
 export const createInstagramVideo = async (req: Request, res: Response) => {
   try {
+    await ensureInstagramTable();
+
     const {
       title,
       post_url,
@@ -172,6 +342,8 @@ export const createInstagramVideo = async (req: Request, res: Response) => {
  */
 export const updateInstagramVideo = async (req: Request, res: Response) => {
   try {
+    await ensureInstagramTable();
+
     const { id } = req.params;
     const videoId = parseInt(id, 10);
 
@@ -241,6 +413,8 @@ export const updateInstagramVideo = async (req: Request, res: Response) => {
  */
 export const deleteInstagramVideo = async (req: Request, res: Response) => {
   try {
+    await ensureInstagramTable();
+
     const { id } = req.params;
     const videoId = parseInt(id, 10);
 
@@ -269,6 +443,8 @@ export const deleteInstagramVideo = async (req: Request, res: Response) => {
  */
 export const toggleInstagramVideoActive = async (req: Request, res: Response) => {
   try {
+    await ensureInstagramTable();
+
     const { id } = req.params;
     const videoId = parseInt(id, 10);
 
