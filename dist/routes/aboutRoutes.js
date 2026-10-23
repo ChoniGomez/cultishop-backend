@@ -4,6 +4,8 @@ const express_1 = require("express");
 const aboutController_1 = require("../controllers/aboutController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = (0, express_1.Router)();
+// Endpoint Consolidado: Obtener en 1 sola llamada Sobre Nosotros + Instagram + FAQ + Ubicación
+router.get('/bundle', aboutController_1.getInstitutionalBundle);
 // Rutas de Lectura (Públicas y para administración)
 router.get('/', aboutController_1.getActiveAboutSections);
 router.get('/all', aboutController_1.getAllAboutSectionsAdmin);

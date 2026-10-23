@@ -92,7 +92,11 @@ const createOrder = async (req, res) => {
         total_amount, 
         status
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'pending')
-      RETURNING *
+      RETURNING 
+        id, user_id, customer_name, customer_email, whatsapp_phone, phone, country,
+        street_address, apartment, city, state, postal_code, payment_method,
+        shipping_method, shipping_address, notes, items, total_amount, status,
+        created_at, updated_at
     `, [
             userId,
             clientName,
@@ -217,7 +221,12 @@ const getMyOrders = async (req, res) => {
             }
         }
         const result = await database_1.pool.query(`
-      SELECT * FROM orders 
+      SELECT 
+        id, user_id, customer_name, customer_email, whatsapp_phone, phone, country,
+        street_address, apartment, city, state, postal_code, payment_method,
+        shipping_method, shipping_address, notes, items, total_amount, status,
+        created_at, updated_at
+      FROM orders 
       WHERE user_id = $1 OR (customer_email IS NOT NULL AND LOWER(customer_email) = $2)
       ORDER BY id DESC, created_at DESC
     `, [targetUserId, authEmail]);
@@ -255,7 +264,11 @@ const updateOrderStatus = async (req, res) => {
       UPDATE orders 
       SET status = $1, updated_at = NOW() 
       WHERE id = $2 
-      RETURNING *
+      RETURNING 
+        id, user_id, customer_name, customer_email, whatsapp_phone, phone, country,
+        street_address, apartment, city, state, postal_code, payment_method,
+        shipping_method, shipping_address, notes, items, total_amount, status,
+        created_at, updated_at
     `, [status, id]);
         const updated = updateResult.rows[0];
         return res.json({

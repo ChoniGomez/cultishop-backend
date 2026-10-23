@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
+import { cache } from '../utils/cache';
 
 /**
  * Publicaciones y videos de Instagram por defecto (respaldo de contingencia)
@@ -86,6 +87,15 @@ export const seedDefaultInstagramVideos = async () => {
 export const getActiveInstagramVideos = async (req: Request, res: Response) => {
   try {
     const includeAll = req.query.all === 'true' || req.query.admin === 'true';
+    const cacheKey = includeAll ? 'instagram:admin:all' : 'instagram:public:active';
+
+    if (!includeAll) {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     let rows: any[] = [];
 
     try {
@@ -110,9 +120,7 @@ export const getActiveInstagramVideos = async (req: Request, res: Response) => {
             post_url,
             thumbnail_url,
             order_index,
-            is_active,
-            created_at,
-            updated_at
+            is_active
           FROM instagram_videos
           WHERE is_active = true
           ORDER BY order_index ASC, id ASC
@@ -126,7 +134,7 @@ export const getActiveInstagramVideos = async (req: Request, res: Response) => {
       const retryRes = await pool.query(
         includeAll
           ? `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos ORDER BY order_index ASC, id ASC`
-          : `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos WHERE is_active = true ORDER BY order_index ASC, id ASC`
+          : `SELECT id, title, post_url, thumbnail_url, order_index, is_active FROM instagram_videos WHERE is_active = true ORDER BY order_index ASC, id ASC`
       );
       rows = retryRes.rows || [];
     }
@@ -136,18 +144,23 @@ export const getActiveInstagramVideos = async (req: Request, res: Response) => {
       const retryRes = await pool.query(
         includeAll
           ? `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos ORDER BY order_index ASC, id ASC`
-          : `SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos WHERE is_active = true ORDER BY order_index ASC, id ASC`
+          : `SELECT id, title, post_url, thumbnail_url, order_index, is_active FROM instagram_videos WHERE is_active = true ORDER BY order_index ASC, id ASC`
       );
       rows = retryRes.rows && retryRes.rows.length > 0 ? retryRes.rows : DEFAULT_INSTAGRAM_VIDEOS;
     }
 
-    return res.json({
+    const responseData = {
       videos: rows,
       data: rows
-    });
+    };
+
+    if (!includeAll) {
+      cache.set(cacheKey, responseData, 300);
+    }
+
+    return res.json(responseData);
   } catch (error: any) {
     console.error('Recuperando de error en getActiveInstagramVideos (retornando respaldo):', error?.message || error);
-    // Jamás responder con 500 para evitar pantalla en blanco en la tienda
     return res.json({
       videos: DEFAULT_INSTAGRAM_VIDEOS,
       data: DEFAULT_INSTAGRAM_VIDEOS,
@@ -241,13 +254,13 @@ export const getInstagramVideoById = async (req: Request, res: Response) => {
     let result;
     try {
       result = await pool.query(
-        'SELECT * FROM instagram_videos WHERE id = $1',
+        'SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos WHERE id = $1',
         [parsedId]
       );
     } catch (err) {
       await ensureInstagramTable();
       result = await pool.query(
-        'SELECT * FROM instagram_videos WHERE id = $1',
+        'SELECT id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at FROM instagram_videos WHERE id = $1',
         [parsedId]
       );
     }
@@ -314,7 +327,7 @@ export const createInstagramVideo = async (req: Request, res: Response) => {
         order_index,
         is_active
       ) VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
+      RETURNING id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at
       `,
       [
         finalTitle,
@@ -324,6 +337,10 @@ export const createInstagramVideo = async (req: Request, res: Response) => {
         finalIsActive
       ]
     );
+
+    // Invalidar caché
+    cache.invalidate('instagram');
+    cache.invalidate('institutional');
 
     return res.status(201).json({
       message: 'Video de Instagram registrado exitosamente.',
@@ -347,7 +364,7 @@ export const updateInstagramVideo = async (req: Request, res: Response) => {
     const { id } = req.params;
     const videoId = parseInt(id, 10);
 
-    const existing = await pool.query('SELECT * FROM instagram_videos WHERE id = $1', [videoId]);
+    const existing = await pool.query('SELECT id, title, post_url, thumbnail_url, order_index, is_active FROM instagram_videos WHERE id = $1', [videoId]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Video de Instagram no encontrado.' });
     }
@@ -384,7 +401,7 @@ export const updateInstagramVideo = async (req: Request, res: Response) => {
         is_active = $5,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $6
-      RETURNING *
+      RETURNING id, title, post_url, thumbnail_url, order_index, is_active, created_at, updated_at
       `,
       [
         finalTitle || 'Video CultiShop @culti.shopp',
@@ -395,6 +412,10 @@ export const updateInstagramVideo = async (req: Request, res: Response) => {
         videoId
       ]
     );
+
+    // Invalidar caché
+    cache.invalidate('instagram');
+    cache.invalidate('institutional');
 
     return res.json({
       message: 'Video de Instagram actualizado exitosamente.',
@@ -426,6 +447,10 @@ export const deleteInstagramVideo = async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Video de Instagram no encontrado para eliminar.' });
     }
+
+    // Invalidar caché
+    cache.invalidate('instagram');
+    cache.invalidate('institutional');
 
     return res.json({
       message: `Publicación "${result.rows[0].title}" eliminada correctamente.`,
@@ -462,6 +487,10 @@ export const toggleInstagramVideoActive = async (req: Request, res: Response) =>
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Video de Instagram no encontrado.' });
     }
+
+    // Invalidar caché
+    cache.invalidate('instagram');
+    cache.invalidate('institutional');
 
     const stateText = result.rows[0].is_active ? 'visible en galería' : 'oculto';
     return res.json({

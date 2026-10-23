@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
+import { cache } from '../utils/cache';
 
 /**
  * Obtener listado de preguntas frecuentes activas para la vista pública (/faq)
@@ -8,6 +9,15 @@ import { pool } from '../config/database';
 export const getActiveFaqs = async (req: Request, res: Response) => {
   try {
     const includeAll = req.query.all === 'true' || req.query.admin === 'true';
+    const cacheKey = includeAll ? 'faqs:admin:all' : 'faqs:public:active';
+
+    if (!includeAll) {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     const query = includeAll
       ? `
         SELECT 
@@ -29,9 +39,7 @@ export const getActiveFaqs = async (req: Request, res: Response) => {
           answer,
           category,
           order_index,
-          is_active,
-          created_at,
-          updated_at
+          is_active
         FROM faqs
         WHERE is_active = true
         ORDER BY order_index ASC, id ASC
@@ -39,10 +47,16 @@ export const getActiveFaqs = async (req: Request, res: Response) => {
 
     const result = await pool.query(query);
 
-    return res.json({
+    const responseData = {
       faqs: result.rows,
       data: result.rows
-    });
+    };
+
+    if (!includeAll) {
+      cache.set(cacheKey, responseData, 300);
+    }
+
+    return res.json(responseData);
   } catch (error: any) {
     console.error('Error en getActiveFaqs:', error);
     return res.status(500).json({ error: 'Error al obtener preguntas frecuentes.' });
@@ -87,7 +101,7 @@ export const getFaqById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT * FROM faqs WHERE id = $1',
+      'SELECT id, question, answer, category, order_index, is_active, created_at, updated_at FROM faqs WHERE id = $1',
       [parseInt(id, 10)]
     );
 
@@ -111,21 +125,19 @@ export const getFaqById = async (req: Request, res: Response) => {
  */
 export const createFaq = async (req: Request, res: Response) => {
   try {
-    const {
-      question,
-      answer,
-      category,
-      order_index,
-      is_active
-    } = req.body;
+    const { question, answer, category, order_index, is_active } = req.body;
 
     if (!question || !String(question).trim()) {
-      return res.status(400).json({ error: 'La pregunta es obligatoria.' });
+      return res.status(400).json({ error: 'El campo pregunta es obligatorio.' });
     }
 
     if (!answer || !String(answer).trim()) {
-      return res.status(400).json({ error: 'La respuesta es obligatoria.' });
+      return res.status(400).json({ error: 'El campo respuesta es obligatorio.' });
     }
+
+    const finalQuestion = String(question).trim();
+    const finalAnswer = String(answer).trim();
+    const finalCategory = category && String(category).trim() ? String(category).trim() : 'General';
 
     let parsedOrder = 0;
     if (order_index !== undefined && order_index !== null && order_index !== '') {
@@ -136,7 +148,6 @@ export const createFaq = async (req: Request, res: Response) => {
     }
 
     const finalIsActive = is_active !== undefined ? Boolean(is_active) : true;
-    const finalCategory = category && String(category).trim() ? String(category).trim() : 'General';
 
     const result = await pool.query(
       `
@@ -147,16 +158,14 @@ export const createFaq = async (req: Request, res: Response) => {
         order_index,
         is_active
       ) VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
+      RETURNING id, question, answer, category, order_index, is_active, created_at, updated_at
       `,
-      [
-        String(question).trim(),
-        String(answer).trim(),
-        finalCategory,
-        parsedOrder,
-        finalIsActive
-      ]
+      [finalQuestion, finalAnswer, finalCategory, parsedOrder, finalIsActive]
     );
+
+    // Invalidar caché
+    cache.invalidate('faqs');
+    cache.invalidate('institutional');
 
     return res.status(201).json({
       message: 'Pregunta frecuente creada exitosamente.',
@@ -178,19 +187,13 @@ export const updateFaq = async (req: Request, res: Response) => {
     const { id } = req.params;
     const faqId = parseInt(id, 10);
 
-    const existing = await pool.query('SELECT * FROM faqs WHERE id = $1', [faqId]);
+    const existing = await pool.query('SELECT id, question, answer, category, order_index, is_active FROM faqs WHERE id = $1', [faqId]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Pregunta frecuente no encontrada.' });
     }
 
     const current = existing.rows[0];
-    const {
-      question,
-      answer,
-      category,
-      order_index,
-      is_active
-    } = req.body;
+    const { question, answer, category, order_index, is_active } = req.body;
 
     const newQuestion = question !== undefined ? String(question).trim() : current.question;
     const newAnswer = answer !== undefined ? String(answer).trim() : current.answer;
@@ -220,10 +223,14 @@ export const updateFaq = async (req: Request, res: Response) => {
           is_active = $5,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $6
-      RETURNING *
+      RETURNING id, question, answer, category, order_index, is_active, created_at, updated_at
       `,
       [newQuestion, newAnswer, newCategory, newOrder, newIsActive, faqId]
     );
+
+    // Invalidar caché
+    cache.invalidate('faqs');
+    cache.invalidate('institutional');
 
     return res.json({
       message: 'Pregunta frecuente actualizada exitosamente.',
@@ -253,6 +260,10 @@ export const deleteFaq = async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Pregunta frecuente no encontrada para eliminar.' });
     }
+
+    // Invalidar caché
+    cache.invalidate('faqs');
+    cache.invalidate('institutional');
 
     return res.json({
       message: `Pregunta frecuente eliminada correctamente.`,
@@ -288,6 +299,10 @@ export const toggleFaqActive = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Pregunta frecuente no encontrada.' });
     }
 
+    // Invalidar caché
+    cache.invalidate('faqs');
+    cache.invalidate('institutional');
+
     const stateText = result.rows[0].is_active ? 'publicada' : 'oculta';
     return res.json({
       message: `Pregunta ahora está ${stateText}.`,
@@ -298,4 +313,3 @@ export const toggleFaqActive = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Error al alternar estado de la pregunta frecuente.' });
   }
 };
-

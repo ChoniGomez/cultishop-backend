@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
+import { cache } from '../utils/cache';
 
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text: string) => {
@@ -162,14 +163,24 @@ const SELECT_PRODUCT_FIELDS = `
  */
 export const getProducts = async (req: Request, res: Response) => {
   try {
+    const cacheKey = 'products:all';
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const result = await pool.query(`
       ${SELECT_PRODUCT_FIELDS}
       ORDER BY p.id ASC
     `);
 
     const products = result.rows.map(formatProductRow);
+    const responseData = { products };
 
-    return res.json({ products });
+    // Caché en memoria por 60 segundos
+    cache.set(cacheKey, responseData, 60);
+
+    return res.json(responseData);
   } catch (error: any) {
     console.error('Error en getProducts:', error);
     return res.status(500).json({ error: 'Error al obtener productos de la base de datos.' });
@@ -182,6 +193,12 @@ export const getProducts = async (req: Request, res: Response) => {
 export const getProductById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const cacheKey = `products:item:${id}`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const isNumeric = /^\d+$/.test(id);
     const param = isNumeric ? parseInt(id, 10) : id;
 
@@ -196,7 +213,12 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 
     const product = formatProductRow(result.rows[0]);
-    return res.json({ product });
+    const responseData = { product };
+
+    // Caché individual por 60 segundos
+    cache.set(cacheKey, responseData, 60);
+
+    return res.json(responseData);
   } catch (error: any) {
     console.error('Error en getProductById:', error);
     return res.status(500).json({ error: 'Error al consultar producto.' });
@@ -417,6 +439,10 @@ export const createProduct = async (req: Request, res: Response) => {
     const fetchNew = await pool.query(`${SELECT_PRODUCT_FIELDS} WHERE p.id = $1`, [newId]);
     const createdProduct = formatProductRow(fetchNew.rows[0]);
 
+    // Invalidar caché
+    cache.invalidate('products');
+    cache.invalidate('categories');
+
     return res.status(201).json({
       message: 'Producto creado exitosamente.',
       product: createdProduct
@@ -631,6 +657,10 @@ export const updateProduct = async (req: Request, res: Response) => {
     const fetchUpdated = await pool.query(`${SELECT_PRODUCT_FIELDS} WHERE p.id = $1`, [targetId]);
     const updatedProduct = formatProductRow(fetchUpdated.rows[0]);
 
+    // Invalidar caché
+    cache.invalidate('products');
+    cache.invalidate('categories');
+
     return res.json({
       message: 'Producto actualizado con éxito.',
       product: updatedProduct
@@ -658,6 +688,10 @@ export const deleteProduct = async (req: Request, res: Response) => {
     }
 
     await pool.query('DELETE FROM products WHERE id = $1', [check.rows[0].id]);
+
+    // Invalidar caché
+    cache.invalidate('products');
+    cache.invalidate('categories');
 
     return res.json({
       message: `Producto "${check.rows[0].title}" eliminado correctamente del catálogo.`

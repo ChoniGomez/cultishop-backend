@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateLocationSettings = exports.getLocationSettings = exports.sanitizeGoogleMapsEmbedUrl = exports.DEFAULT_LOCATION_SETTINGS = exports.updatePaymentSettings = exports.getPaymentSettings = exports.DEFAULT_PAYMENT_SETTINGS = void 0;
 const database_1 = require("../config/database");
+const cache_1 = require("../utils/cache");
 exports.DEFAULT_PAYMENT_SETTINGS = {
     bank_alias: 'CULTISHOP.POSADAS',
     bank_cbu: '',
@@ -15,18 +16,26 @@ exports.DEFAULT_PAYMENT_SETTINGS = {
  */
 const getPaymentSettings = async (_req, res) => {
     try {
+        const cached = cache_1.cache.get('settings:payment');
+        if (cached) {
+            return res.json(cached);
+        }
         const result = await database_1.pool.query("SELECT value FROM settings WHERE key = 'payment' LIMIT 1");
         if (result.rows.length === 0) {
-            return res.json({ payment: exports.DEFAULT_PAYMENT_SETTINGS });
+            const responseData = { payment: exports.DEFAULT_PAYMENT_SETTINGS };
+            cache_1.cache.set('settings:payment', responseData, 300);
+            return res.json(responseData);
         }
         const value = result.rows[0].value;
         const payment = typeof value === 'string' ? JSON.parse(value) : value;
-        return res.json({
+        const responseData = {
             payment: {
                 ...exports.DEFAULT_PAYMENT_SETTINGS,
                 ...payment
             }
-        });
+        };
+        cache_1.cache.set('settings:payment', responseData, 300);
+        return res.json(responseData);
     }
     catch (error) {
         console.error('Error en getPaymentSettings:', error.message);
@@ -69,6 +78,8 @@ const updatePaymentSettings = async (req, res) => {
     `, [JSON.stringify(updatedPayment)]);
         const savedValue = upsertRes.rows[0].value;
         const finalPayment = typeof savedValue === 'string' ? JSON.parse(savedValue) : savedValue;
+        // Invalidar caché
+        cache_1.cache.invalidate('settings');
         return res.json({
             message: 'Configuración de datos de pago actualizada exitosamente.',
             payment: finalPayment
@@ -104,9 +115,15 @@ const sanitizeGoogleMapsEmbedUrl = (raw) => {
 exports.sanitizeGoogleMapsEmbedUrl = sanitizeGoogleMapsEmbedUrl;
 const getLocationSettings = async (_req, res) => {
     try {
+        const cached = cache_1.cache.get('settings:location');
+        if (cached) {
+            return res.json(cached);
+        }
         const result = await database_1.pool.query("SELECT value FROM settings WHERE key = 'location' LIMIT 1");
         if (result.rows.length === 0) {
-            return res.json({ location: exports.DEFAULT_LOCATION_SETTINGS });
+            const responseData = { location: exports.DEFAULT_LOCATION_SETTINGS };
+            cache_1.cache.set('settings:location', responseData, 300);
+            return res.json(responseData);
         }
         const value = result.rows[0].value;
         const location = typeof value === 'string' ? JSON.parse(value) : value;
@@ -120,7 +137,9 @@ const getLocationSettings = async (_req, res) => {
         merged.store_hours = location.store_hours || location.hours || exports.DEFAULT_LOCATION_SETTINGS.store_hours;
         merged.phone = location.phone || location.store_phone || exports.DEFAULT_LOCATION_SETTINGS.phone;
         merged.store_phone = location.store_phone || location.phone || exports.DEFAULT_LOCATION_SETTINGS.store_phone;
-        return res.json({ location: merged });
+        const responseData = { location: merged };
+        cache_1.cache.set('settings:location', responseData, 300);
+        return res.json(responseData);
     }
     catch (error) {
         console.warn('Recuperando en getLocationSettings con valores por defecto:', error.message);
@@ -172,6 +191,9 @@ const updateLocationSettings = async (req, res) => {
     `, [JSON.stringify(updatedLocation)]);
         const savedValue = upsertRes.rows[0].value;
         const finalLocation = typeof savedValue === 'string' ? JSON.parse(savedValue) : savedValue;
+        // Invalidar caché
+        cache_1.cache.invalidate('settings');
+        cache_1.cache.invalidate('institutional');
         return res.json({
             message: 'Ubicación y mapa de Google Maps actualizados exitosamente.',
             location: finalLocation

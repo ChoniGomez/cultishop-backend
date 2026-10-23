@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  getInstitutionalBundle,
   getActiveAboutSections,
   getAllAboutSectionsAdmin,
   getAboutSectionById,
@@ -11,6 +12,9 @@ import {
 import { requireAuth, requireAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
+
+// Endpoint Consolidado: Obtener en 1 sola llamada Sobre Nosotros + Instagram + FAQ + Ubicación
+router.get('/bundle', getInstitutionalBundle);
 
 // Rutas de Lectura (Públicas y para administración)
 router.get('/', getActiveAboutSections);

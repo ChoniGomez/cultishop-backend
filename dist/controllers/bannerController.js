@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteBanner = exports.toggleBannerActive = exports.updateBanner = exports.createBanner = exports.getBannerById = exports.getAllBannersAdmin = exports.getActiveBanners = void 0;
 const database_1 = require("../config/database");
+const cache_1 = require("../utils/cache");
 /**
  * Obtener listado de banners activos para el slider público
  * GET /api/banners
@@ -9,6 +10,13 @@ const database_1 = require("../config/database");
 const getActiveBanners = async (req, res) => {
     try {
         const includeAll = req.query.all === 'true' || req.query.admin === 'true';
+        const cacheKey = includeAll ? 'banners:all' : 'banners:active';
+        if (!includeAll) {
+            const cached = cache_1.cache.get(cacheKey);
+            if (cached) {
+                return res.json(cached);
+            }
+        }
         const query = includeAll
             ? `
         SELECT 
@@ -51,10 +59,15 @@ const getActiveBanners = async (req, res) => {
             cta_text: row.button_text,
             cta_link: row.link_url
         }));
-        return res.json({
+        const responseData = {
             banners: formattedRows,
             data: formattedRows
-        });
+        };
+        if (!includeAll) {
+            // Guardar en caché por 180 segundos (3 minutos)
+            cache_1.cache.set(cacheKey, responseData, 180);
+        }
+        return res.json(responseData);
     }
     catch (error) {
         console.error('Error en getActiveBanners:', error);
@@ -167,6 +180,8 @@ const createBanner = async (req, res) => {
             showTextBool
         ]);
         const newBanner = insertResult.rows[0];
+        // Invalidar caché
+        cache_1.cache.invalidate('banners');
         return res.status(201).json({
             message: 'Banner publicitario creado con éxito.',
             banner: newBanner
@@ -236,6 +251,8 @@ const updateBanner = async (req, res) => {
             finalShowText,
             bannerId
         ]);
+        // Invalidar caché
+        cache_1.cache.invalidate('banners');
         return res.json({
             message: 'Banner actualizado exitosamente.',
             banner: updateResult.rows[0]
@@ -267,6 +284,8 @@ const toggleBannerActive = async (req, res) => {
         if (updateResult.rows.length === 0) {
             return res.status(404).json({ error: 'Banner no encontrado.' });
         }
+        // Invalidar caché
+        cache_1.cache.invalidate('banners');
         return res.json({
             message: `Banner ${updateResult.rows[0].is_active ? 'activado' : 'desactivado'} con éxito.`,
             banner: updateResult.rows[0]
@@ -293,6 +312,8 @@ const deleteBanner = async (req, res) => {
         if (deleteResult.rows.length === 0) {
             return res.status(404).json({ error: 'Banner no encontrado.' });
         }
+        // Invalidar caché
+        cache_1.cache.invalidate('banners');
         return res.json({
             message: `Banner "${deleteResult.rows[0].title}" eliminado con éxito.`,
             id: bannerId

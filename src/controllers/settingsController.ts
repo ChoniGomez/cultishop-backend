@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { cache } from '../utils/cache';
 
 export interface PaymentSettings {
   bank_alias: string;
@@ -24,23 +25,33 @@ export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
  */
 export const getPaymentSettings = async (_req: Request, res: Response) => {
   try {
+    const cached = cache.get('settings:payment');
+    if (cached) {
+      return res.json(cached);
+    }
+
     const result = await pool.query(
       "SELECT value FROM settings WHERE key = 'payment' LIMIT 1"
     );
 
     if (result.rows.length === 0) {
-      return res.json({ payment: DEFAULT_PAYMENT_SETTINGS });
+      const responseData = { payment: DEFAULT_PAYMENT_SETTINGS };
+      cache.set('settings:payment', responseData, 300);
+      return res.json(responseData);
     }
 
     const value = result.rows[0].value;
     const payment = typeof value === 'string' ? JSON.parse(value) : value;
 
-    return res.json({
+    const responseData = {
       payment: {
         ...DEFAULT_PAYMENT_SETTINGS,
         ...payment
       }
-    });
+    };
+
+    cache.set('settings:payment', responseData, 300);
+    return res.json(responseData);
   } catch (error: any) {
     console.error('Error en getPaymentSettings:', error.message);
     return res.json({ payment: DEFAULT_PAYMENT_SETTINGS });
@@ -97,6 +108,9 @@ export const updatePaymentSettings = async (req: AuthenticatedRequest, res: Resp
     const savedValue = upsertRes.rows[0].value;
     const finalPayment = typeof savedValue === 'string' ? JSON.parse(savedValue) : savedValue;
 
+    // Invalidar caché
+    cache.invalidate('settings');
+
     return res.json({
       message: 'Configuración de datos de pago actualizada exitosamente.',
       payment: finalPayment
@@ -143,12 +157,19 @@ export const sanitizeGoogleMapsEmbedUrl = (raw: string): string => {
 
 export const getLocationSettings = async (_req: Request, res: Response) => {
   try {
+    const cached = cache.get('settings:location');
+    if (cached) {
+      return res.json(cached);
+    }
+
     const result = await pool.query(
       "SELECT value FROM settings WHERE key = 'location' LIMIT 1"
     );
 
     if (result.rows.length === 0) {
-      return res.json({ location: DEFAULT_LOCATION_SETTINGS });
+      const responseData = { location: DEFAULT_LOCATION_SETTINGS };
+      cache.set('settings:location', responseData, 300);
+      return res.json(responseData);
     }
 
     const value = result.rows[0].value;
@@ -166,7 +187,10 @@ export const getLocationSettings = async (_req: Request, res: Response) => {
     merged.phone = location.phone || location.store_phone || DEFAULT_LOCATION_SETTINGS.phone;
     merged.store_phone = location.store_phone || location.phone || DEFAULT_LOCATION_SETTINGS.store_phone;
 
-    return res.json({ location: merged });
+    const responseData = { location: merged };
+    cache.set('settings:location', responseData, 300);
+
+    return res.json(responseData);
   } catch (error: any) {
     console.warn('Recuperando en getLocationSettings con valores por defecto:', error.message);
     return res.json({ location: DEFAULT_LOCATION_SETTINGS });
@@ -238,6 +262,10 @@ export const updateLocationSettings = async (req: AuthenticatedRequest, res: Res
 
     const savedValue = upsertRes.rows[0].value;
     const finalLocation = typeof savedValue === 'string' ? JSON.parse(savedValue) : savedValue;
+
+    // Invalidar caché
+    cache.invalidate('settings');
+    cache.invalidate('institutional');
 
     return res.json({
       message: 'Ubicación y mapa de Google Maps actualizados exitosamente.',

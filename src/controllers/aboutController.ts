@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
+import { cache } from '../utils/cache';
+import { ensureInstagramTable, DEFAULT_INSTAGRAM_VIDEOS } from './instagramController';
+import { DEFAULT_LOCATION_SETTINGS } from './settingsController';
 
 /**
  * Bloques institucionales por defecto de CultiShop (respaldo de contingencia)
@@ -76,12 +79,98 @@ export const seedDefaultAboutSections = async () => {
 };
 
 /**
+ * Endpoint Consolidado Institucional (Sobre Nosotros + Instagram + FAQ + Ubicación)
+ * Reduce 3-4 peticiones HTTP y consultas de base de datos a una sola llamada ultrarrápida
+ * GET /api/about/bundle
+ */
+export const getInstitutionalBundle = async (_req: Request, res: Response) => {
+  try {
+    const cacheKey = 'institutional:bundle';
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    await Promise.all([
+      ensureAboutTable(),
+      ensureInstagramTable()
+    ]);
+
+    // Ejecutar consultas seleccionando estrictamente las columnas necesarias
+    const [aboutRes, instaRes, faqRes, locRes] = await Promise.all([
+      pool.query(`
+        SELECT id, title, subtitle, content, image_url, order_index
+        FROM about_sections
+        WHERE is_active = true
+        ORDER BY order_index ASC, id ASC
+      `),
+      pool.query(`
+        SELECT id, title, post_url, thumbnail_url, order_index
+        FROM instagram_videos
+        WHERE is_active = true
+        ORDER BY order_index ASC, id ASC
+      `),
+      pool.query(`
+        SELECT id, question, answer, category, order_index
+        FROM faqs
+        WHERE is_active = true
+        ORDER BY order_index ASC, id ASC
+      `),
+      pool.query(`
+        SELECT value FROM settings WHERE key = 'location' LIMIT 1
+      `)
+    ]);
+
+    const about = aboutRes.rows && aboutRes.rows.length > 0 ? aboutRes.rows : DEFAULT_ABOUT_SECTIONS;
+    const instagram = instaRes.rows && instaRes.rows.length > 0 ? instaRes.rows : DEFAULT_INSTAGRAM_VIDEOS;
+    const faqs = faqRes.rows || [];
+
+    let location = DEFAULT_LOCATION_SETTINGS;
+    if (locRes.rows.length > 0) {
+      const val = locRes.rows[0].value;
+      const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+      location = { ...DEFAULT_LOCATION_SETTINGS, ...parsed };
+    }
+
+    const bundle = {
+      about,
+      instagram,
+      faqs,
+      location
+    };
+
+    // Almacenar en caché por 300 segundos (5 minutos)
+    cache.set(cacheKey, bundle, 300);
+
+    return res.json(bundle);
+  } catch (error: any) {
+    console.error('Error en getInstitutionalBundle (retornando respaldo):', error?.message || error);
+    return res.json({
+      about: DEFAULT_ABOUT_SECTIONS,
+      instagram: DEFAULT_INSTAGRAM_VIDEOS,
+      faqs: [],
+      location: DEFAULT_LOCATION_SETTINGS,
+      fallback: true
+    });
+  }
+};
+
+/**
  * Obtener listado de bloques institucionales activos para la vista pública "Sobre Nosotros"
  * GET /api/about
  */
 export const getActiveAboutSections = async (req: Request, res: Response) => {
   try {
     const includeAll = req.query.all === 'true' || req.query.admin === 'true';
+    const cacheKey = includeAll ? 'about:admin:all' : 'about:public:active';
+
+    if (!includeAll) {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     let rows: any[] = [];
 
     try {
@@ -108,9 +197,7 @@ export const getActiveAboutSections = async (req: Request, res: Response) => {
             content,
             image_url,
             order_index,
-            is_active,
-            created_at,
-            updated_at
+            is_active
           FROM about_sections
           WHERE is_active = true
           ORDER BY order_index ASC, id ASC
@@ -124,29 +211,33 @@ export const getActiveAboutSections = async (req: Request, res: Response) => {
       const retryRes = await pool.query(
         includeAll
           ? `SELECT id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at FROM about_sections ORDER BY order_index ASC, id ASC`
-          : `SELECT id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at FROM about_sections WHERE is_active = true ORDER BY order_index ASC, id ASC`
+          : `SELECT id, title, subtitle, content, image_url, order_index, is_active FROM about_sections WHERE is_active = true ORDER BY order_index ASC, id ASC`
       );
       rows = retryRes.rows || [];
     }
 
-    // Si la tabla está vacía, sembrar automáticamente y responder con los bloques oficiales
     if (rows.length === 0) {
       await seedDefaultAboutSections();
       const retryRes = await pool.query(
         includeAll
           ? `SELECT id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at FROM about_sections ORDER BY order_index ASC, id ASC`
-          : `SELECT id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at FROM about_sections WHERE is_active = true ORDER BY order_index ASC, id ASC`
+          : `SELECT id, title, subtitle, content, image_url, order_index, is_active FROM about_sections WHERE is_active = true ORDER BY order_index ASC, id ASC`
       );
       rows = retryRes.rows && retryRes.rows.length > 0 ? retryRes.rows : DEFAULT_ABOUT_SECTIONS;
     }
 
-    return res.json({
+    const responseData = {
       sections: rows,
       data: rows
-    });
+    };
+
+    if (!includeAll) {
+      cache.set(cacheKey, responseData, 300);
+    }
+
+    return res.json(responseData);
   } catch (error: any) {
-    console.error('Recuperando de error en getActiveAboutSections (retornando estructura por defecto):', error?.message || error);
-    // Jamás responder con 500 para evitar que la vista pública se rompa
+    console.error('Recuperando de error en getActiveAboutSections (retornando respaldo):', error?.message || error);
     return res.json({
       sections: DEFAULT_ABOUT_SECTIONS,
       data: DEFAULT_ABOUT_SECTIONS,
@@ -243,19 +334,18 @@ export const getAboutSectionById = async (req: Request, res: Response) => {
     let result;
     try {
       result = await pool.query(
-        'SELECT * FROM about_sections WHERE id = $1',
+        'SELECT id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at FROM about_sections WHERE id = $1',
         [parsedId]
       );
     } catch (err) {
       await ensureAboutTable();
       result = await pool.query(
-        'SELECT * FROM about_sections WHERE id = $1',
+        'SELECT id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at FROM about_sections WHERE id = $1',
         [parsedId]
       );
     }
 
     if (!result || result.rows.length === 0) {
-      // Buscar en los bloques por defecto si coincide
       const fallbackItem = DEFAULT_ABOUT_SECTIONS.find(s => s.id === parsedId);
       if (fallbackItem) {
         return res.json({
@@ -323,7 +413,7 @@ export const createAboutSection = async (req: Request, res: Response) => {
         order_index,
         is_active
       ) VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *
+      RETURNING id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at
       `,
       [
         String(title).trim(),
@@ -334,6 +424,10 @@ export const createAboutSection = async (req: Request, res: Response) => {
         finalIsActive
       ]
     );
+
+    // Invalidar caché en memoria
+    cache.invalidate('about');
+    cache.invalidate('institutional');
 
     return res.status(201).json({
       message: 'Bloque institucional creado exitosamente.',
@@ -357,7 +451,7 @@ export const updateAboutSection = async (req: Request, res: Response) => {
     const { id } = req.params;
     const sectionId = parseInt(id, 10);
 
-    const existing = await pool.query('SELECT * FROM about_sections WHERE id = $1', [sectionId]);
+    const existing = await pool.query('SELECT id, title, subtitle, content, image_url, order_index, is_active FROM about_sections WHERE id = $1', [sectionId]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Bloque institucional no encontrado.' });
     }
@@ -402,7 +496,7 @@ export const updateAboutSection = async (req: Request, res: Response) => {
         is_active = $6,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $7
-      RETURNING *
+      RETURNING id, title, subtitle, content, image_url, order_index, is_active, created_at, updated_at
       `,
       [
         finalTitle,
@@ -414,6 +508,10 @@ export const updateAboutSection = async (req: Request, res: Response) => {
         sectionId
       ]
     );
+
+    // Invalidar caché en memoria
+    cache.invalidate('about');
+    cache.invalidate('institutional');
 
     return res.json({
       message: 'Bloque institucional actualizado exitosamente.',
@@ -445,6 +543,10 @@ export const deleteAboutSection = async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Bloque institucional no encontrado para eliminar.' });
     }
+
+    // Invalidar caché en memoria
+    cache.invalidate('about');
+    cache.invalidate('institutional');
 
     return res.json({
       message: `Bloque "${result.rows[0].title}" eliminado correctamente.`,
@@ -481,6 +583,10 @@ export const toggleAboutSectionActive = async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Bloque institucional no encontrado.' });
     }
+
+    // Invalidar caché en memoria
+    cache.invalidate('about');
+    cache.invalidate('institutional');
 
     const stateText = result.rows[0].is_active ? 'publicado' : 'oculto';
     return res.json({

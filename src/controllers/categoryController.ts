@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
+import { cache } from '../utils/cache';
 
 /**
  * Función auxiliar para normalizar texto a slug URL amigable
@@ -44,8 +45,22 @@ async function generateUniqueSlug(baseSlug: string, excludeId?: number): Promise
 export const getCategories = async (req: Request, res: Response) => {
   try {
     const includeHidden = req.query.all === 'true' || req.query.include_hidden === 'true';
+    const cacheKey = includeHidden ? 'categories:all' : 'categories:public';
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
 
     const query = `
+      WITH prod_counts AS (
+        SELECT cat_id, COUNT(*)::int AS cnt
+        FROM (
+          SELECT category_id AS cat_id FROM products WHERE category_id IS NOT NULL
+          UNION ALL
+          SELECT subcategory_id AS cat_id FROM products WHERE subcategory_id IS NOT NULL
+        ) combined
+        GROUP BY cat_id
+      )
       SELECT 
         c.id, 
         c.parent_id, 
@@ -55,12 +70,9 @@ export const getCategories = async (req: Request, res: Response) => {
         c.display_order, 
         COALESCE(c.is_visible, true) AS is_visible,
         c.created_at,
-        (
-          SELECT COUNT(*)::int 
-          FROM products p 
-          WHERE p.category_id = c.id OR p.subcategory_id = c.id
-        ) AS products_count
+        COALESCE(pc.cnt, 0)::int AS products_count
       FROM categories c
+      LEFT JOIN prod_counts pc ON pc.cat_id = c.id
       ${includeHidden ? '' : 'WHERE c.is_visible = true OR c.is_visible IS NULL'}
       ORDER BY c.display_order ASC, c.name ASC
     `;
@@ -94,10 +106,15 @@ export const getCategories = async (req: Request, res: Response) => {
       };
     });
 
-    return res.json({
+    const responseData = {
       categories: structured,
       all_categories: allCategories
-    });
+    };
+
+    // Cache por 300 segundos (5 minutos)
+    cache.set(cacheKey, responseData, 300);
+
+    return res.json(responseData);
   } catch (error: any) {
     console.error('Error en getCategories:', error);
     return res.status(500).json({ error: 'Error al obtener categorías de la base de datos.' });
@@ -168,6 +185,10 @@ export const createCategory = async (req: Request, res: Response) => {
     );
 
     const newCategory = insertResult.rows[0];
+
+    // Invalidar caché
+    cache.invalidate('categories');
+    cache.invalidate('products');
 
     return res.status(201).json({
       message: parentIdNum ? 'Subcategoría creada con éxito.' : 'Categoría creada con éxito.',
@@ -283,6 +304,10 @@ export const updateCategory = async (req: Request, res: Response) => {
       [finalName, finalSlug, finalParentId, finalDescription, finalOrder, finalVisible, categoryId]
     );
 
+    // Invalidar caché
+    cache.invalidate('categories');
+    cache.invalidate('products');
+
     return res.json({
       message: 'Categoría actualizada con éxito.',
       category: updateRes.rows[0]
@@ -317,6 +342,10 @@ export const toggleCategoryVisibility = async (req: Request, res: Response) => {
       'UPDATE categories SET is_visible = $1 WHERE id = $2 RETURNING *',
       [newVisible, categoryId]
     );
+
+    // Invalidar caché
+    cache.invalidate('categories');
+    cache.invalidate('products');
 
     return res.json({
       message: newVisible ? 'Categoría visible en la tienda pública.' : 'Categoría ocultada de la tienda pública.',
@@ -382,6 +411,10 @@ export const deleteCategory = async (req: Request, res: Response) => {
 
     // Eliminar la categoría principal o subcategoría
     const deleteRes = await pool.query('DELETE FROM categories WHERE id = $1 RETURNING *', [categoryId]);
+
+    // Invalidar caché
+    cache.invalidate('categories');
+    cache.invalidate('products');
 
     return res.json({
       success: true,
