@@ -22,7 +22,7 @@ exports.DEFAULT_ABOUT_SECTIONS = [
         id: 2,
         title: 'Asesoramiento Técnico & Cercanía',
         subtitle: 'Acompañamiento en cada etapa de tu ciclo',
-        content: 'Ya sea que estés dando tus primeros pasos con tu primera planta o gestionando salas indoor automatizadas de alta exigencia, te acompañamos en cada fase: germinación, vegetativo, floración y curado. En nuestro local físico en Av. López y Planes 2919 y en nuestros canales digitales encontrás respuestas claras, tablas de nutrición y diagnóstico preventivo de plagas.',
+        content: 'Ya sea que estés dando tus primeros pasos con tu primera planta o gestionando salas indoor automatizadas de alta exigencia, te acompañamos en cada fase: germinación, vegetativo, floración y curado. En nuestro local físico en Av. López y Planes casi Lavalle ("adentro del ACUARIUM") y en nuestros canales digitales encontrás respuestas claras, tablas de nutrición y diagnóstico preventivo de plagas.',
         image_url: 'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=1200',
         order_index: 2,
         is_active: true

@@ -134,13 +134,13 @@ export interface LocationSettings {
 }
 
 export const DEFAULT_LOCATION_SETTINGS: LocationSettings = {
-  store_address: 'Av. López y Planes 2919 (entre Lavalle y Santa Catalina)',
+  store_address: 'Av. López y Planes casi Lavalle ("adentro del ACUARIUM")',
   store_city: 'Posadas, Misiones, Argentina',
   store_hours: 'Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs',
   store_phone: '+54 9 376 435-6995',
-  google_maps_url: 'https://maps.google.com/?q=Av.+López+y+Planes+2919,+Posadas',
-  google_maps_embed_url: 'https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+2919,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed',
-  address: 'Av. López y Planes 2919 (entre Lavalle y Santa Catalina), Posadas, Misiones, Argentina',
+  google_maps_url: 'https://maps.google.com/?q=Av.+López+y+Planes+y+Lavalle,+Posadas',
+  google_maps_embed_url: 'https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+y+Lavalle,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed',
+  address: 'Av. López y Planes casi Lavalle ("adentro del ACUARIUM"), Posadas, Misiones, Argentina',
   hours: 'Lunes a Sábados de 9:00 a 13:00 y de 16:30 a 20:30 hs',
   phone: '+54 9 376 435-6995'
 };
