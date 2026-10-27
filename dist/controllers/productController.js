@@ -69,6 +69,12 @@ const formatProductRow = (row) => {
         subcategorySlug = row.category_slug;
         subcategoryId = row.category_id;
     }
+    else if (!categoryId && row.subcategory_parent_id) {
+        // Si el producto no tenía category_id directo pero sí subcategoría con categoría padre
+        categoryName = row.sub_parent_name || 'Varios';
+        categorySlug = row.sub_parent_slug || '';
+        categoryId = row.subcategory_parent_id;
+    }
     const defaultStock = typeof row.stock === 'number' ? row.stock : parseInt(row.stock, 10) || 0;
     const defaultPrice = typeof row.price === 'number' ? row.price : parseFloat(row.price) || 0;
     const rawOptions = Array.isArray(row.options) ? row.options : parseJsonField(row.options, []);
@@ -148,27 +154,111 @@ const SELECT_PRODUCT_FIELDS = `
     pcat.slug as parent_category_slug,
     sub.name as subcategory_name,
     sub.slug as subcategory_slug,
+    sub.parent_id as subcategory_parent_id,
+    sub_parent.name as sub_parent_name,
+    sub_parent.slug as sub_parent_slug,
     p.created_at,
     p.updated_at
   FROM products p
   LEFT JOIN categories c ON p.category_id = c.id
   LEFT JOIN categories pcat ON c.parent_id = pcat.id
   LEFT JOIN categories sub ON p.subcategory_id = sub.id
+  LEFT JOIN categories sub_parent ON sub.parent_id = sub_parent.id
 `;
 /**
- * Obtener todos los productos (catálogo completo)
+ * Obtener todos los productos (catálogo completo o filtrado por categoría/subcategoría)
  */
 const getProducts = async (req, res) => {
     try {
-        const cacheKey = 'products:all';
+        const { category, category_id, subcategory, subcategory_id, search, all } = req.query;
+        const cacheKey = `products:${JSON.stringify(req.query)}`;
         const cached = cache_1.cache.get(cacheKey);
         if (cached) {
             return res.json(cached);
         }
+        const whereConditions = [];
+        const queryParams = [];
+        let paramIndex = 1;
+        // Filtro de productos activos (a menos que se especifique all=true)
+        if (all !== 'true') {
+            whereConditions.push(`(p.is_active = true OR p.is_active IS NULL)`);
+        }
+        // Filtro de búsqueda textual opcional
+        if (search && typeof search === 'string' && search.trim() !== '') {
+            const searchParam = `%${search.trim().toLowerCase()}%`;
+            queryParams.push(searchParam);
+            whereConditions.push(`(
+        LOWER(p.title) LIKE $${paramIndex} OR 
+        LOWER(COALESCE(p.description, '')) LIKE $${paramIndex} OR 
+        LOWER(COALESCE(p.brand, '')) LIKE $${paramIndex}
+      )`);
+            paramIndex++;
+        }
+        // Resolución de categoría principal y subcategoría
+        let targetCatId = null;
+        let targetSubcatId = null;
+        if (category_id && !isNaN(Number(category_id))) {
+            targetCatId = parseInt(String(category_id), 10);
+        }
+        else if (category && typeof category === 'string' && category.trim() !== '' && category.toLowerCase() !== 'todos') {
+            const catClean = category.trim().toLowerCase();
+            const catRes = await database_1.pool.query(`SELECT id, parent_id FROM categories WHERE LOWER(slug) = $1 OR LOWER(name) = $1 LIMIT 1`, [catClean]);
+            if (catRes.rows.length > 0) {
+                if (catRes.rows[0].parent_id) {
+                    // El slug recibido era directamente una subcategoría
+                    targetSubcatId = catRes.rows[0].id;
+                    targetCatId = catRes.rows[0].parent_id;
+                }
+                else {
+                    targetCatId = catRes.rows[0].id;
+                }
+            }
+        }
+        if (subcategory_id && !isNaN(Number(subcategory_id))) {
+            targetSubcatId = parseInt(String(subcategory_id), 10);
+        }
+        else if (subcategory && typeof subcategory === 'string' && subcategory.trim() !== '') {
+            const subClean = subcategory.trim().toLowerCase();
+            const subRes = await database_1.pool.query(`SELECT id FROM categories WHERE (LOWER(slug) = $1 OR LOWER(name) = $1) ${targetCatId ? 'AND parent_id = $2' : ''} LIMIT 1`, targetCatId ? [subClean, targetCatId] : [subClean]);
+            if (subRes.rows.length > 0) {
+                targetSubcatId = subRes.rows[0].id;
+            }
+        }
+        // 1. Si se filtró por una subcategoría específica
+        if (targetSubcatId) {
+            queryParams.push(targetSubcatId);
+            whereConditions.push(`(p.subcategory_id = $${paramIndex} OR p.category_id = $${paramIndex})`);
+            paramIndex++;
+        }
+        else if (targetCatId) {
+            // 2. Si se filtró por una categoría principal:
+            // Debe incluir todos los productos que pertenezcan directamente a la categoría
+            // O a cualquiera de sus subcategorías hijas asociadas
+            const subRes = await database_1.pool.query(`SELECT id FROM categories WHERE parent_id = $1`, [targetCatId]);
+            const childSubIds = subRes.rows.map((r) => r.id);
+            if (childSubIds.length > 0) {
+                queryParams.push(targetCatId);
+                const catIdx = paramIndex++;
+                queryParams.push(childSubIds);
+                const subIdsIdx = paramIndex++;
+                whereConditions.push(`(
+          p.category_id = $${catIdx} 
+          OR p.category_id = ANY($${subIdsIdx}) 
+          OR p.subcategory_id = ANY($${subIdsIdx})
+        )`);
+            }
+            else {
+                queryParams.push(targetCatId);
+                whereConditions.push(`(p.category_id = $${paramIndex} OR p.subcategory_id = $${paramIndex})`);
+                paramIndex++;
+            }
+        }
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const result = await database_1.pool.query(`
       ${SELECT_PRODUCT_FIELDS}
+      ${whereClause}
       ORDER BY p.id ASC
-    `);
+    `, queryParams);
         const products = result.rows.map(formatProductRow);
         const responseData = { products };
         // Caché en memoria por 60 segundos

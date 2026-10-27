@@ -52,15 +52,6 @@ export const getCategories = async (req: Request, res: Response) => {
     }
 
     const query = `
-      WITH prod_counts AS (
-        SELECT cat_id, COUNT(*)::int AS cnt
-        FROM (
-          SELECT category_id AS cat_id FROM products WHERE category_id IS NOT NULL
-          UNION ALL
-          SELECT subcategory_id AS cat_id FROM products WHERE subcategory_id IS NOT NULL
-        ) combined
-        GROUP BY cat_id
-      )
       SELECT 
         c.id, 
         c.parent_id, 
@@ -70,9 +61,24 @@ export const getCategories = async (req: Request, res: Response) => {
         c.display_order, 
         COALESCE(c.is_visible, true) AS is_visible,
         c.created_at,
-        COALESCE(pc.cnt, 0)::int AS products_count
+        (
+          SELECT COUNT(DISTINCT p.id)::int
+          FROM products p
+          WHERE (p.category_id = c.id OR p.subcategory_id = c.id)
+            ${includeHidden ? '' : 'AND (p.is_active = true OR p.is_active IS NULL)'}
+        ) AS products_count,
+        (
+          SELECT COUNT(DISTINCT p.id)::int
+          FROM products p
+          WHERE (
+            p.category_id = c.id 
+            OR p.subcategory_id = c.id 
+            OR p.subcategory_id IN (SELECT sc.id FROM categories sc WHERE sc.parent_id = c.id)
+            OR p.category_id IN (SELECT sc.id FROM categories sc WHERE sc.parent_id = c.id)
+          )
+          ${includeHidden ? '' : 'AND (p.is_active = true OR p.is_active IS NULL)'}
+        ) AS total_products_count
       FROM categories c
-      LEFT JOIN prod_counts pc ON pc.cat_id = c.id
       ${includeHidden ? '' : 'WHERE c.is_visible = true OR c.is_visible IS NULL'}
       ORDER BY c.display_order ASC, c.name ASC
     `;
@@ -83,15 +89,14 @@ export const getCategories = async (req: Request, res: Response) => {
     // Separar categorías principales (parent_id IS NULL)
     const mainCategories = allCategories.filter(cat => cat.parent_id === null || cat.parent_id === undefined);
 
-    // Armar estructura jerárquica con conteo acumulado de productos
+    // Armar estructura jerárquica con conteo acumulado y sin duplicación de productos
     const structured = mainCategories.map(main => {
       const subcategories = allCategories.filter(cat => cat.parent_id === main.id);
-      const subsTotalProducts = subcategories.reduce((acc, sub) => acc + (Number(sub.products_count) || 0), 0);
-      const totalProductsCount = (Number(main.products_count) || 0) + subsTotalProducts;
 
       return {
         ...main,
-        total_products_count: totalProductsCount,
+        products_count: Number(main.products_count) || 0,
+        total_products_count: Number(main.total_products_count) || 0,
         subcategories: subcategories.map(sub => ({
           id: sub.id,
           parent_id: sub.parent_id,
