@@ -170,7 +170,7 @@ const SELECT_PRODUCT_FIELDS = `
  */
 const getProducts = async (req, res) => {
     try {
-        const { category, category_id, subcategory, subcategory_id, search, all } = req.query;
+        const { category, category_id, subcategory, subcategory_id, search, all, limit, sort, featured } = req.query;
         const cacheKey = `products:${JSON.stringify(req.query)}`;
         const cached = cache_1.cache.get(cacheKey);
         if (cached) {
@@ -254,10 +254,29 @@ const getProducts = async (req, res) => {
             }
         }
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        let orderByClause = 'ORDER BY p.id ASC';
+        if (featured === 'true' || sort === 'featured') {
+            orderByClause = `ORDER BY 
+        CASE 
+          WHEN p.badge IS NOT NULL AND p.badge != '' AND p.badge != 'SIN STOCK' THEN 0 
+          ELSE 1 
+        END,
+        p.id DESC`;
+        }
+        else if (sort === 'recent' || sort === 'newest' || sort === 'desc') {
+            orderByClause = 'ORDER BY p.id DESC';
+        }
+        let limitClause = '';
+        if (limit && !isNaN(Number(limit))) {
+            const parsedLimit = Math.max(1, Math.min(100, parseInt(String(limit), 10)));
+            queryParams.push(parsedLimit);
+            limitClause = `LIMIT $${paramIndex++}`;
+        }
         const result = await database_1.pool.query(`
       ${SELECT_PRODUCT_FIELDS}
       ${whereClause}
-      ORDER BY p.id ASC
+      ${orderByClause}
+      ${limitClause}
     `, queryParams);
         const products = result.rows.map(formatProductRow);
         const responseData = { products };
