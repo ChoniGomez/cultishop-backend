@@ -4,6 +4,9 @@ const express_1 = require("express");
 const instagramController_1 = require("../controllers/instagramController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = (0, express_1.Router)();
+// Endpoint para auto-detectar miniatura y título desde un enlace de Instagram
+router.get('/fetch-thumbnail', authMiddleware_1.requireAuth, authMiddleware_1.requireAdmin, instagramController_1.fetchInstagramThumbnail);
+router.post('/fetch-thumbnail', authMiddleware_1.requireAuth, authMiddleware_1.requireAdmin, instagramController_1.fetchInstagramThumbnail);
 // Rutas de Lectura (Públicas y para administración)
 router.get('/', instagramController_1.getActiveInstagramVideos);
 router.get('/all', instagramController_1.getAllInstagramVideosAdmin);

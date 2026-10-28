@@ -6,11 +6,16 @@ import {
   createInstagramVideo,
   updateInstagramVideo,
   deleteInstagramVideo,
-  toggleInstagramVideoActive
+  toggleInstagramVideoActive,
+  fetchInstagramThumbnail
 } from '../controllers/instagramController';
 import { requireAuth, requireAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
+
+// Endpoint para auto-detectar miniatura y título desde un enlace de Instagram
+router.get('/fetch-thumbnail', requireAuth, requireAdmin, fetchInstagramThumbnail);
+router.post('/fetch-thumbnail', requireAuth, requireAdmin, fetchInstagramThumbnail);
 
 // Rutas de Lectura (Públicas y para administración)
 router.get('/', getActiveInstagramVideos);

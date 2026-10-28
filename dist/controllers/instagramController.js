@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.toggleInstagramVideoActive = exports.deleteInstagramVideo = exports.updateInstagramVideo = exports.createInstagramVideo = exports.getInstagramVideoById = exports.getAllInstagramVideosAdmin = exports.getActiveInstagramVideos = exports.seedDefaultInstagramVideos = exports.ensureInstagramTable = exports.DEFAULT_INSTAGRAM_VIDEOS = void 0;
+exports.fetchInstagramThumbnail = exports.extractInstagramShortcode = exports.toggleInstagramVideoActive = exports.deleteInstagramVideo = exports.updateInstagramVideo = exports.createInstagramVideo = exports.getInstagramVideoById = exports.getAllInstagramVideosAdmin = exports.getActiveInstagramVideos = exports.seedDefaultInstagramVideos = exports.ensureInstagramTable = exports.DEFAULT_INSTAGRAM_VIDEOS = void 0;
 const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
 /**
@@ -59,7 +59,7 @@ const ensureInstagramTable = async () => {
 };
 exports.ensureInstagramTable = ensureInstagramTable;
 /**
- * Siembra los videos iniciales de Instagram si la tabla está vacía
+ * Siembra los videos iniciales de Instagram si la tabla está vacía y repara miniaturas duplicadas
  */
 const seedDefaultInstagramVideos = async () => {
     try {
@@ -71,6 +71,22 @@ const seedDefaultInstagramVideos = async () => {
                 await database_1.pool.query(`INSERT INTO instagram_videos (title, post_url, thumbnail_url, order_index, is_active)
            VALUES ($1, $2, $3, $4, $5)`, [item.title, item.post_url, item.thumbnail_url, item.order_index, item.is_active]);
             }
+        }
+        else {
+            // Corregir imágenes duplicadas en los videos predeterminados para que cada uno tenga su portada diferenciada
+            await database_1.pool.query(`
+        UPDATE instagram_videos 
+        SET thumbnail_url = 'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=800'
+        WHERE id = 2 AND (thumbnail_url = 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=800' OR thumbnail_url IS NULL);
+
+        UPDATE instagram_videos 
+        SET thumbnail_url = 'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=800'
+        WHERE id = 3 AND (thumbnail_url = 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=800' OR thumbnail_url IS NULL);
+
+        UPDATE instagram_videos 
+        SET thumbnail_url = 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=800'
+        WHERE id = 4 AND (thumbnail_url = 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=800' OR thumbnail_url IS NULL);
+      `);
         }
     }
     catch (err) {
@@ -440,3 +456,113 @@ const toggleInstagramVideoActive = async (req, res) => {
     }
 };
 exports.toggleInstagramVideoActive = toggleInstagramVideoActive;
+/**
+ * Helper para extraer el shortcode de una URL de Instagram
+ */
+const extractInstagramShortcode = (url) => {
+    if (!url)
+        return null;
+    const cleaned = url.trim();
+    const match = cleaned.match(/(?:instagram\.com|instagr\.am)\/(?:[a-zA-Z0-9._-]+\/)?(?:p|reel|tv)\/([A-Za-z0-9_-]+)/i)
+        || cleaned.match(/(?:instagram\.com|instagr\.am)\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/i);
+    return match ? match[1] : null;
+};
+exports.extractInstagramShortcode = extractInstagramShortcode;
+/**
+ * Obtener miniatura y título de forma automática desde Instagram
+ * GET/POST /api/instagram/fetch-thumbnail
+ */
+const fetchInstagramThumbnail = async (req, res) => {
+    try {
+        const rawUrl = req.query.url || req.body?.url;
+        if (!rawUrl || !rawUrl.trim()) {
+            return res.status(400).json({ error: 'La URL de Instagram es obligatoria.' });
+        }
+        const shortcode = (0, exports.extractInstagramShortcode)(rawUrl);
+        if (!shortcode) {
+            return res.status(400).json({
+                error: 'No se pudo identificar el código de publicación o Reel en el enlace proporcionado. Asegúrate de que sea un enlace del tipo https://www.instagram.com/reel/C... o /p/C...'
+            });
+        }
+        let thumbnailUrl = null;
+        let title = null;
+        // 1. Intentar consultar la página oficial de embed de Instagram (sin muro de login)
+        try {
+            const embedUrl = `https://www.instagram.com/p/${shortcode}/embed/captioned/`;
+            const embedRes = await fetch(embedUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
+                }
+            });
+            if (embedRes.ok) {
+                const html = await embedRes.text();
+                // Buscar imagen EmbeddedMediaImage o display_url
+                const imgMatch = html.match(/class=["']EmbeddedMediaImage["'][^>]*src=["']([^"']+)["']/i)
+                    || html.match(/<img[^>]*class=["'][^"']*EmbeddedMediaImage[^"']*["'][^>]*src=["']([^"']+)["']/i)
+                    || html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
+                    || html.match(/"display_url"\s*:\s*"([^"]+)"/i)
+                    || html.match(/"thumbnail_src"\s*:\s*"([^"]+)"/i);
+                if (imgMatch && imgMatch[1]) {
+                    thumbnailUrl = imgMatch[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+                }
+                // Buscar título o descripción del caption
+                const captionMatch = html.match(/class=["']Caption["'][^>]*>([^<]+)</i)
+                    || html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+                if (captionMatch && captionMatch[1]) {
+                    title = captionMatch[1].trim();
+                }
+            }
+        }
+        catch (embedErr) {
+            console.warn('Fallo consulta embed de Instagram:', embedErr);
+        }
+        // 2. Si no se obtuvo con embed, intentar con User-Agent de crawler de redes sociales (OpenGraph)
+        if (!thumbnailUrl) {
+            try {
+                const postUrl = `https://www.instagram.com/p/${shortcode}/`;
+                const crawlerRes = await fetch(postUrl, {
+                    headers: {
+                        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    }
+                });
+                if (crawlerRes.ok) {
+                    const html = await crawlerRes.text();
+                    const ogImgMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
+                        || html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+                    if (ogImgMatch && ogImgMatch[1]) {
+                        thumbnailUrl = ogImgMatch[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+                    }
+                    const ogTitleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+                    if (ogTitleMatch && ogTitleMatch[1]) {
+                        title = title || ogTitleMatch[1].trim();
+                    }
+                }
+            }
+            catch (crawlerErr) {
+                console.warn('Fallo consulta crawler OpenGraph Instagram:', crawlerErr);
+            }
+        }
+        if (thumbnailUrl) {
+            return res.json({
+                success: true,
+                shortcode,
+                thumbnail_url: thumbnailUrl,
+                title: title || undefined
+            });
+        }
+        // Si Instagram bloquea la consulta externa o el reel es privado
+        return res.json({
+            success: false,
+            shortcode,
+            message: 'No fue posible obtener la miniatura automáticamente de Instagram debido a protecciones de privacidad del contenido. Puedes subir una imagen o ingresar la URL de la portada manualmente.'
+        });
+    }
+    catch (error) {
+        console.error('Error en fetchInstagramThumbnail:', error);
+        return res.status(500).json({ error: 'Error al procesar el enlace de Instagram.' });
+    }
+};
+exports.fetchInstagramThumbnail = fetchInstagramThumbnail;
