@@ -456,7 +456,8 @@ export async function initDb() {
         console.log(`[initDb] Optimizando ${base64Rows.rows.length} imágenes Base64 residuales a WebP...`);
         for (const row of base64Rows.rows) {
           try {
-            const webpUrl = await processAnyImageInput(row.image_url, `product-${row.id}`, 85);
+            const targetFilename = `product-${row.id}.webp`;
+            const webpUrl = await processAnyImageInput(row.image_url, `product-${row.id}`, 85, targetFilename);
             if (webpUrl && webpUrl !== row.image_url) {
               await pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [webpUrl, row.id]);
             }

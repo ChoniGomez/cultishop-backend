@@ -1,7 +1,9 @@
+import path from 'path';
+import fs from 'fs';
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
 import { cache } from '../utils/cache';
-import { processAnyImageInput, deleteOldImageFile } from '../utils/imageProcessor';
+import { processAnyImageInput, deleteOldImageFile, UPLOADS_DIR } from '../utils/imageProcessor';
 
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text: string) => {
@@ -50,23 +52,31 @@ const normalizeStringArray = (val: any): string[] => {
   return [];
 };
 
-// Sanitizador y migrador en segundo plano de imágenes Base64 hacia archivos WebP
+// Sanitizador y migrador en segundo plano de imágenes Base64 hacia archivos WebP deterministas
 const sanitizeAndMigrateImage = (imageUrl: string | null | undefined, productId: number): string => {
   if (!imageUrl || typeof imageUrl !== 'string') return '';
   const trimmed = imageUrl.trim();
   if (!trimmed.startsWith('data:image/')) return trimmed;
 
-  // Ruta WebP estática predecible
-  const targetWebp = `/uploads/product-${productId}.webp`;
+  const targetFilename = `product-${productId}.webp`;
+  const targetWebp = `/uploads/${targetFilename}`;
+  const targetFilePath = path.join(UPLOADS_DIR, targetFilename);
 
-  // Disparar procesamiento asíncrono con Sharp para guardar el archivo físico en uploads/
-  processAnyImageInput(trimmed, `product-${productId}`, 85)
+  // Si el archivo físico ya existe en el disco, devolver la URL WebP de inmediato sin procesar
+  if (fs.existsSync(targetFilePath)) {
+    return targetWebp;
+  }
+
+  // Disparar procesamiento asíncrono con Sharp guardando EXACTAMENTE con ese nombre determinista
+  processAnyImageInput(trimmed, `product-${productId}`, 85, targetFilename)
     .then((finalUrl) => {
       if (finalUrl && finalUrl !== trimmed) {
-        pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [finalUrl, productId]).catch(() => {});
+        pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [targetWebp, productId]).catch(() => {});
       }
     })
-    .catch(() => {});
+    .catch((err) => {
+      console.warn(`[ImageMigration] No se pudo guardar imagen WebP de producto ${productId}:`, err?.message || err);
+    });
 
   return targetWebp;
 };

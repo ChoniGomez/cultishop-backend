@@ -1,6 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProductById = exports.getProducts = void 0;
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
 const imageProcessor_1 = require("../utils/imageProcessor");
@@ -53,23 +58,30 @@ const normalizeStringArray = (val) => {
     }
     return [];
 };
-// Sanitizador y migrador en segundo plano de imágenes Base64 hacia archivos WebP
+// Sanitizador y migrador en segundo plano de imágenes Base64 hacia archivos WebP deterministas
 const sanitizeAndMigrateImage = (imageUrl, productId) => {
     if (!imageUrl || typeof imageUrl !== 'string')
         return '';
     const trimmed = imageUrl.trim();
     if (!trimmed.startsWith('data:image/'))
         return trimmed;
-    // Ruta WebP estática predecible
-    const targetWebp = `/uploads/product-${productId}.webp`;
-    // Disparar procesamiento asíncrono con Sharp para guardar el archivo físico en uploads/
-    (0, imageProcessor_1.processAnyImageInput)(trimmed, `product-${productId}`, 85)
+    const targetFilename = `product-${productId}.webp`;
+    const targetWebp = `/uploads/${targetFilename}`;
+    const targetFilePath = path_1.default.join(imageProcessor_1.UPLOADS_DIR, targetFilename);
+    // Si el archivo físico ya existe en el disco, devolver la URL WebP de inmediato sin procesar
+    if (fs_1.default.existsSync(targetFilePath)) {
+        return targetWebp;
+    }
+    // Disparar procesamiento asíncrono con Sharp guardando EXACTAMENTE con ese nombre determinista
+    (0, imageProcessor_1.processAnyImageInput)(trimmed, `product-${productId}`, 85, targetFilename)
         .then((finalUrl) => {
         if (finalUrl && finalUrl !== trimmed) {
-            database_1.pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [finalUrl, productId]).catch(() => { });
+            database_1.pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [targetWebp, productId]).catch(() => { });
         }
     })
-        .catch(() => { });
+        .catch((err) => {
+        console.warn(`[ImageMigration] No se pudo guardar imagen WebP de producto ${productId}:`, err?.message || err);
+    });
     return targetWebp;
 };
 // Helper común para formatear la fila del producto
