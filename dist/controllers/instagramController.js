@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchInstagramThumbnail = exports.extractInstagramShortcode = exports.toggleInstagramVideoActive = exports.deleteInstagramVideo = exports.updateInstagramVideo = exports.createInstagramVideo = exports.getInstagramVideoById = exports.getAllInstagramVideosAdmin = exports.getActiveInstagramVideos = exports.seedDefaultInstagramVideos = exports.ensureInstagramTable = exports.DEFAULT_INSTAGRAM_VIDEOS = void 0;
 const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
+const imageProcessor_1 = require("../utils/imageProcessor");
 /**
  * Publicaciones y videos de Instagram por defecto (respaldo de contingencia)
  */
@@ -41,7 +42,7 @@ exports.DEFAULT_INSTAGRAM_VIDEOS = [
     }
 ];
 /**
- * Garantiza que la tabla instagram_videos exista en Neon DB
+ * Garantiza que la tabla instagram_videos exista en la base de datos
  */
 const ensureInstagramTable = async () => {
     await database_1.pool.query(`
@@ -303,7 +304,8 @@ const createInstagramVideo = async (req, res) => {
             parsedOrder = maxOrderRes.rows[0]?.next_order || 1;
         }
         const finalIsActive = is_active !== undefined ? Boolean(is_active) : true;
-        const finalThumbnail = thumbnail_url && String(thumbnail_url).trim() ? String(thumbnail_url).trim() : null;
+        const processedThumbnail = await (0, imageProcessor_1.processAnyImageInput)(thumbnail_url, 'reel', 85);
+        const finalThumbnail = processedThumbnail && String(processedThumbnail).trim() ? String(processedThumbnail).trim() : null;
         const finalTitle = title && String(title).trim() ? String(title).trim() : 'Video CultiShop @culti.shopp';
         const result = await database_1.pool.query(`
       INSERT INTO instagram_videos (
@@ -353,9 +355,21 @@ const updateInstagramVideo = async (req, res) => {
         const { title, post_url, thumbnail_url, order_index, is_active } = req.body;
         const finalTitle = title !== undefined ? String(title).trim() : current.title;
         const finalPostUrl = post_url !== undefined ? String(post_url).trim() : current.post_url;
-        const finalThumbnail = thumbnail_url !== undefined
-            ? (String(thumbnail_url).trim() || null)
-            : current.thumbnail_url;
+        let finalThumbnail = current.thumbnail_url;
+        if (thumbnail_url !== undefined) {
+            if (!thumbnail_url || !String(thumbnail_url).trim()) {
+                finalThumbnail = null;
+                if (current.thumbnail_url) {
+                    await (0, imageProcessor_1.deleteOldImageFile)(current.thumbnail_url);
+                }
+            }
+            else if (thumbnail_url !== current.thumbnail_url) {
+                finalThumbnail = await (0, imageProcessor_1.processAnyImageInput)(thumbnail_url, 'reel', 85);
+                if (current.thumbnail_url && current.thumbnail_url !== finalThumbnail) {
+                    await (0, imageProcessor_1.deleteOldImageFile)(current.thumbnail_url);
+                }
+            }
+        }
         const finalOrder = order_index !== undefined ? (parseInt(String(order_index), 10) || 0) : current.order_index;
         const finalIsActive = is_active !== undefined ? Boolean(is_active) : current.is_active;
         if (!finalPostUrl) {
@@ -404,9 +418,12 @@ const deleteInstagramVideo = async (req, res) => {
         await (0, exports.ensureInstagramTable)();
         const { id } = req.params;
         const videoId = parseInt(id, 10);
-        const result = await database_1.pool.query('DELETE FROM instagram_videos WHERE id = $1 RETURNING id, title', [videoId]);
+        const result = await database_1.pool.query('DELETE FROM instagram_videos WHERE id = $1 RETURNING id, title, thumbnail_url', [videoId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Video de Instagram no encontrado para eliminar.' });
+        }
+        if (result.rows[0].thumbnail_url) {
+            await (0, imageProcessor_1.deleteOldImageFile)(result.rows[0].thumbnail_url);
         }
         // Invalidar caché
         cache_1.cache.invalidate('instagram');

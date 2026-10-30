@@ -6,17 +6,21 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "backup": "node ../database/backup.js"
+    "backup": "node ../database/backup.js",
+    "migrate:images": "node scripts/migrateImagesToWebp.js"
   },
   "dependencies": {
+    "@types/multer": "^2.3.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "google-auth-library": "^9.7.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.5.0",
     "nodemailer": "^6.9.13",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

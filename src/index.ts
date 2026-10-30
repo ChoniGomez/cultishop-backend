@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import authRoutes from './routes/authRoutes';
 import productRoutes from './routes/productRoutes';
 import orderRoutes from './routes/orderRoutes';
@@ -10,7 +11,9 @@ import settingsRoutes from './routes/settingsRoutes';
 import aboutRoutes from './routes/aboutRoutes';
 import instagramRoutes from './routes/instagramRoutes';
 import faqRoutes from './routes/faqRoutes';
+import uploadRoutes from './routes/uploadRoutes';
 import { initDb } from './config/initDb';
+import { UPLOADS_DIR } from './utils/imageProcessor';
 
 dotenv.config();
 
@@ -20,6 +23,12 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Servir archivos estáticos de imágenes WebP optimizadas con cabeceras de caché eficientes
+app.use('/uploads', express.static(UPLOADS_DIR, {
+  maxAge: '30d',
+  immutable: true
+}));
 
 // Inicializar verificación de esquema y usuario administrador
 initDb().catch(err => console.error('Error al iniciar base de datos:', err));
@@ -34,6 +43,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/about', aboutRoutes);
 app.use('/api/instagram', instagramRoutes);
 app.use('/api/faqs', faqRoutes);
+app.use('/api/upload', uploadRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });

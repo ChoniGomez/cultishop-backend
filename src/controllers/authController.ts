@@ -104,7 +104,7 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Credenciales inválidas. Verifica tu correo y contraseña.' });
     }
 
-    // Rol verificado dinámicamente según la base de datos Neon
+    // Rol verificado dinámicamente según la base de datos
     const effectiveRole = user.role || 'consumidor';
 
     // Generar token JWT
@@ -214,7 +214,7 @@ export const googleAuth = async (req: Request, res: Response) => {
       user = insertResult.rows[0];
     }
 
-    // El rol efectivo proviene siempre dinámicamente de la base de datos Neon
+    // El rol efectivo proviene siempre dinámicamente de la base de datos
     const effectiveRole = user.role || 'consumidor';
 
     // Generar JWT de CultiShop

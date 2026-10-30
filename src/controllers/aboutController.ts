@@ -3,6 +3,7 @@ import { pool } from '../config/database';
 import { cache } from '../utils/cache';
 import { ensureInstagramTable, DEFAULT_INSTAGRAM_VIDEOS } from './instagramController';
 import { DEFAULT_LOCATION_SETTINGS } from './settingsController';
+import { processAnyImageInput, deleteOldImageFile } from '../utils/imageProcessor';
 
 /**
  * Bloques institucionales por defecto de CultiShop (respaldo de contingencia)
@@ -38,7 +39,7 @@ export const DEFAULT_ABOUT_SECTIONS = [
 ];
 
 /**
- * Garantiza que la tabla about_sections exista en Neon DB
+ * Garantiza que la tabla about_sections exista en la base de datos
  */
 export const ensureAboutTable = async () => {
   await pool.query(`
@@ -400,7 +401,9 @@ export const createAboutSection = async (req: Request, res: Response) => {
     }
 
     const finalIsActive = is_active !== undefined ? Boolean(is_active) : true;
-    const finalImage = image_url && String(image_url).trim() ? String(image_url).trim() : null;
+    const rawImage = image_url && String(image_url).trim() ? String(image_url).trim() : null;
+    // Conversión automática a formato WebP optimizado al 85%
+    const finalImage = await processAnyImageInput(rawImage, 'about', 85);
     const finalSubtitle = subtitle && String(subtitle).trim() ? String(subtitle).trim() : null;
 
     const result = await pool.query(
@@ -471,9 +474,15 @@ export const updateAboutSection = async (req: Request, res: Response) => {
       ? (String(subtitle).trim() || null) 
       : current.subtitle;
     const finalContent = content !== undefined ? String(content).trim() : current.content;
-    const finalImage = image_url !== undefined 
+    const rawImage = image_url !== undefined 
       ? (String(image_url).trim() || null) 
       : current.image_url;
+    // Conversión automática a formato WebP optimizado al 85%
+    const finalImage = await processAnyImageInput(rawImage, 'about', 85);
+
+    if (current.image_url && current.image_url !== finalImage) {
+      await deleteOldImageFile(current.image_url);
+    }
     const finalOrder = order_index !== undefined ? (parseInt(String(order_index), 10) || 0) : current.order_index;
     const finalIsActive = is_active !== undefined ? Boolean(is_active) : current.is_active;
 
@@ -536,12 +545,16 @@ export const deleteAboutSection = async (req: Request, res: Response) => {
     const sectionId = parseInt(id, 10);
 
     const result = await pool.query(
-      'DELETE FROM about_sections WHERE id = $1 RETURNING id, title',
+      'DELETE FROM about_sections WHERE id = $1 RETURNING id, title, image_url',
       [sectionId]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Bloque institucional no encontrado para eliminar.' });
+    }
+
+    if (result.rows[0]?.image_url) {
+      await deleteOldImageFile(result.rows[0].image_url);
     }
 
     // Invalidar caché en memoria

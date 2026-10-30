@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
 import { cache } from '../utils/cache';
+import { processAnyImageInput, deleteOldImageFile } from '../utils/imageProcessor';
 
 /**
  * Publicaciones y videos de Instagram por defecto (respaldo de contingencia)
@@ -41,7 +42,7 @@ export const DEFAULT_INSTAGRAM_VIDEOS = [
 ];
 
 /**
- * Garantiza que la tabla instagram_videos exista en Neon DB
+ * Garantiza que la tabla instagram_videos exista en la base de datos
  */
 export const ensureInstagramTable = async () => {
   await pool.query(`
@@ -330,7 +331,8 @@ export const createInstagramVideo = async (req: Request, res: Response) => {
     }
 
     const finalIsActive = is_active !== undefined ? Boolean(is_active) : true;
-    const finalThumbnail = thumbnail_url && String(thumbnail_url).trim() ? String(thumbnail_url).trim() : null;
+    const processedThumbnail = await processAnyImageInput(thumbnail_url, 'reel', 85);
+    const finalThumbnail = processedThumbnail && String(processedThumbnail).trim() ? String(processedThumbnail).trim() : null;
     const finalTitle = title && String(title).trim() ? String(title).trim() : 'Video CultiShop @culti.shopp';
 
     const result = await pool.query(
@@ -395,9 +397,20 @@ export const updateInstagramVideo = async (req: Request, res: Response) => {
 
     const finalTitle = title !== undefined ? String(title).trim() : current.title;
     const finalPostUrl = post_url !== undefined ? String(post_url).trim() : current.post_url;
-    const finalThumbnail = thumbnail_url !== undefined 
-      ? (String(thumbnail_url).trim() || null) 
-      : current.thumbnail_url;
+    let finalThumbnail = current.thumbnail_url;
+    if (thumbnail_url !== undefined) {
+      if (!thumbnail_url || !String(thumbnail_url).trim()) {
+        finalThumbnail = null;
+        if (current.thumbnail_url) {
+          await deleteOldImageFile(current.thumbnail_url);
+        }
+      } else if (thumbnail_url !== current.thumbnail_url) {
+        finalThumbnail = await processAnyImageInput(thumbnail_url, 'reel', 85);
+        if (current.thumbnail_url && current.thumbnail_url !== finalThumbnail) {
+          await deleteOldImageFile(current.thumbnail_url);
+        }
+      }
+    }
     const finalOrder = order_index !== undefined ? (parseInt(String(order_index), 10) || 0) : current.order_index;
     const finalIsActive = is_active !== undefined ? Boolean(is_active) : current.is_active;
 
@@ -455,12 +468,16 @@ export const deleteInstagramVideo = async (req: Request, res: Response) => {
     const videoId = parseInt(id, 10);
 
     const result = await pool.query(
-      'DELETE FROM instagram_videos WHERE id = $1 RETURNING id, title',
+      'DELETE FROM instagram_videos WHERE id = $1 RETURNING id, title, thumbnail_url',
       [videoId]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Video de Instagram no encontrado para eliminar.' });
+    }
+
+    if (result.rows[0].thumbnail_url) {
+      await deleteOldImageFile(result.rows[0].thumbnail_url);
     }
 
     // Invalidar caché

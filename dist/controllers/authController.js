@@ -78,7 +78,7 @@ const login = async (req, res) => {
         if (!isMatch) {
             return res.status(401).json({ error: 'Credenciales inválidas. Verifica tu correo y contraseña.' });
         }
-        // Rol verificado dinámicamente según la base de datos Neon
+        // Rol verificado dinámicamente según la base de datos
         const effectiveRole = user.role || 'consumidor';
         // Generar token JWT
         const token = jsonwebtoken_1.default.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: '7d' });
@@ -169,7 +169,7 @@ const googleAuth = async (req, res) => {
          RETURNING id, name, email, role, is_adult, created_at`, [displayName, cleanEmail, googleId]);
             user = insertResult.rows[0];
         }
-        // El rol efectivo proviene siempre dinámicamente de la base de datos Neon
+        // El rol efectivo proviene siempre dinámicamente de la base de datos
         const effectiveRole = user.role || 'consumidor';
         // Generar JWT de CultiShop
         const token = jsonwebtoken_1.default.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: '7d' });

@@ -399,7 +399,7 @@ export async function initDb() {
     }
   });
 
-  // 5. Actualizar imágenes obsoletas en Neon DB hacia fotos temáticas verificadas
+  // 5. Actualizar imágenes obsoletas en la base de datos hacia fotos temáticas verificadas
   await safeStep('default_images', async () => {
     const defaultCannabisImages: { [key: number]: string } = {
       1: 'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=600',

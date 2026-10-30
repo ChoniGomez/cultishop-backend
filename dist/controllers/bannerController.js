@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteBanner = exports.toggleBannerActive = exports.updateBanner = exports.createBanner = exports.getBannerById = exports.getAllBannersAdmin = exports.getActiveBanners = void 0;
 const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
+const imageProcessor_1 = require("../utils/imageProcessor");
 /**
  * Obtener listado de banners activos para el slider público
  * GET /api/banners
@@ -153,6 +154,8 @@ const createBanner = async (req, res) => {
         if (!image_url || !image_url.trim()) {
             return res.status(400).json({ error: 'La URL de la imagen horizontal del banner es obligatoria.' });
         }
+        // Conversión automática a formato WebP optimizado al 85%
+        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(image_url.trim(), 'banner', 85);
         const numOrder = parseInt(display_order, 10) || 0;
         const activeBool = is_active !== false && is_active !== 'false';
         const insertResult = await database_1.pool.query(`
@@ -172,7 +175,7 @@ const createBanner = async (req, res) => {
     `, [
             finalTitle,
             subtitle ? subtitle.trim() : null,
-            image_url.trim(),
+            finalImage,
             link_url ? link_url.trim() : null,
             button_text ? button_text.trim() : 'Ver Más',
             numOrder,
@@ -217,9 +220,15 @@ const updateBanner = async (req, res) => {
         if (!finalTitle && finalShowText) {
             return res.status(400).json({ error: 'El título no puede estar vacío.' });
         }
-        const finalImage = image_url !== undefined ? image_url.trim() : current.image_url;
-        if (!finalImage) {
+        const rawImage = image_url !== undefined ? image_url.trim() : current.image_url;
+        if (!rawImage) {
             return res.status(400).json({ error: 'La URL de la imagen no puede estar vacía.' });
+        }
+        // Conversión automática a formato WebP optimizado al 85%
+        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'banner', 85);
+        // Si la imagen cambió y la anterior era un archivo local, limpiar el archivo viejo
+        if (current.image_url && current.image_url !== finalImage) {
+            await (0, imageProcessor_1.deleteOldImageFile)(current.image_url);
         }
         const finalSubtitle = subtitle !== undefined ? (subtitle ? subtitle.trim() : null) : current.subtitle;
         const finalLink = link_url !== undefined ? (link_url ? link_url.trim() : null) : current.link_url;
@@ -308,9 +317,12 @@ const deleteBanner = async (req, res) => {
         if (isNaN(bannerId)) {
             return res.status(400).json({ error: 'ID de banner no válido.' });
         }
-        const deleteResult = await database_1.pool.query('DELETE FROM banners WHERE id = $1 RETURNING id, title', [bannerId]);
+        const deleteResult = await database_1.pool.query('DELETE FROM banners WHERE id = $1 RETURNING id, title, image_url', [bannerId]);
         if (deleteResult.rows.length === 0) {
             return res.status(404).json({ error: 'Banner no encontrado.' });
+        }
+        if (deleteResult.rows[0]?.image_url) {
+            await (0, imageProcessor_1.deleteOldImageFile)(deleteResult.rows[0].image_url);
         }
         // Invalidar caché
         cache_1.cache.invalidate('banners');

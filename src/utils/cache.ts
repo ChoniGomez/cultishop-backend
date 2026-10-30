@@ -1,7 +1,7 @@
 /**
  * Gestor de caché en memoria de alta velocidad para Node.js / Express.
  * 
- * Reduce drásticamente las consultas repetitivas a Neon DB (PostgreSQL Serverless)
+ * Reduce drásticamente las consultas repetitivas a la base de datos PostgreSQL
  * y el consumo de transferencia de red (bandwidth), permitiendo que las vistas públicas
  * (catálogo, categorías, banners, contenido institucional y preguntas frecuentes)
  * se respondan en menos de 1-2 ms directamente desde la memoria RAM del servidor.

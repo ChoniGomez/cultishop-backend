@@ -5,6 +5,7 @@ const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
 const instagramController_1 = require("./instagramController");
 const settingsController_1 = require("./settingsController");
+const imageProcessor_1 = require("../utils/imageProcessor");
 /**
  * Bloques institucionales por defecto de CultiShop (respaldo de contingencia)
  */
@@ -38,7 +39,7 @@ exports.DEFAULT_ABOUT_SECTIONS = [
     }
 ];
 /**
- * Garantiza que la tabla about_sections exista en Neon DB
+ * Garantiza que la tabla about_sections exista en la base de datos
  */
 const ensureAboutTable = async () => {
     await database_1.pool.query(`
@@ -364,7 +365,9 @@ const createAboutSection = async (req, res) => {
             parsedOrder = maxOrderRes.rows[0]?.next_order || 1;
         }
         const finalIsActive = is_active !== undefined ? Boolean(is_active) : true;
-        const finalImage = image_url && String(image_url).trim() ? String(image_url).trim() : null;
+        const rawImage = image_url && String(image_url).trim() ? String(image_url).trim() : null;
+        // Conversión automática a formato WebP optimizado al 85%
+        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'about', 85);
         const finalSubtitle = subtitle && String(subtitle).trim() ? String(subtitle).trim() : null;
         const result = await database_1.pool.query(`
       INSERT INTO about_sections (
@@ -419,9 +422,14 @@ const updateAboutSection = async (req, res) => {
             ? (String(subtitle).trim() || null)
             : current.subtitle;
         const finalContent = content !== undefined ? String(content).trim() : current.content;
-        const finalImage = image_url !== undefined
+        const rawImage = image_url !== undefined
             ? (String(image_url).trim() || null)
             : current.image_url;
+        // Conversión automática a formato WebP optimizado al 85%
+        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'about', 85);
+        if (current.image_url && current.image_url !== finalImage) {
+            await (0, imageProcessor_1.deleteOldImageFile)(current.image_url);
+        }
         const finalOrder = order_index !== undefined ? (parseInt(String(order_index), 10) || 0) : current.order_index;
         const finalIsActive = is_active !== undefined ? Boolean(is_active) : current.is_active;
         if (!finalTitle) {
@@ -475,9 +483,12 @@ const deleteAboutSection = async (req, res) => {
         await (0, exports.ensureAboutTable)();
         const { id } = req.params;
         const sectionId = parseInt(id, 10);
-        const result = await database_1.pool.query('DELETE FROM about_sections WHERE id = $1 RETURNING id, title', [sectionId]);
+        const result = await database_1.pool.query('DELETE FROM about_sections WHERE id = $1 RETURNING id, title, image_url', [sectionId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Bloque institucional no encontrado para eliminar.' });
+        }
+        if (result.rows[0]?.image_url) {
+            await (0, imageProcessor_1.deleteOldImageFile)(result.rows[0].image_url);
         }
         // Invalidar caché en memoria
         cache_1.cache.invalidate('about');

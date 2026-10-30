@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProductById = exports.getProducts = void 0;
 const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
+const imageProcessor_1 = require("../utils/imageProcessor");
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text) => {
     return text
@@ -368,7 +369,9 @@ const createProduct = async (req, res) => {
         if (!title || !String(title).trim()) {
             return res.status(400).json({ error: 'El título del producto es obligatorio.' });
         }
-        const finalImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
+        const rawImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
+        // Conversión automática a formato WebP optimizado al 85%
+        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'product', 85);
         const numDiscount = discount_price !== undefined && discount_price !== null && discount_price !== '' ? Number(discount_price) : null;
         // Normalizar opciones con precio y stock independiente (fuente de verdad obligatoria)
         let normalizedOptions = [];
@@ -512,7 +515,13 @@ const updateProduct = async (req, res) => {
         let finalStock = stock !== undefined ? parseInt(stock, 10) : current.stock;
         if (isNaN(finalStock))
             finalStock = 0;
-        const finalImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
+        const rawImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
+        // Conversión automática a formato WebP optimizado al 85%
+        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'product', 85);
+        // Si la imagen cambió y la anterior era un archivo local, limpiar el archivo viejo
+        if (current.image_url && current.image_url !== finalImage) {
+            await (0, imageProcessor_1.deleteOldImageFile)(current.image_url);
+        }
         let finalBadge = badge !== undefined ? (badge !== null ? String(badge).trim() : null) : current.badge;
         if (finalBadge === 'none' || (finalBadge && finalBadge.toLowerCase() === 'sin etiqueta') || finalBadge === '') {
             finalBadge = null;
@@ -664,12 +673,17 @@ const deleteProduct = async (req, res) => {
         const { id } = req.params;
         const isNumeric = /^\d+$/.test(id);
         const check = isNumeric
-            ? await database_1.pool.query('SELECT id, title FROM products WHERE id = $1', [parseInt(id, 10)])
-            : await database_1.pool.query('SELECT id, title FROM products WHERE slug = $1', [id]);
+            ? await database_1.pool.query('SELECT id, title, image_url FROM products WHERE id = $1', [parseInt(id, 10)])
+            : await database_1.pool.query('SELECT id, title, image_url FROM products WHERE slug = $1', [id]);
         if (check.rows.length === 0) {
             return res.status(404).json({ error: 'Producto no encontrado.' });
         }
+        const deletedImage = check.rows[0].image_url;
         await database_1.pool.query('DELETE FROM products WHERE id = $1', [check.rows[0].id]);
+        // Eliminar archivo local asociado si existía
+        if (deletedImage) {
+            await (0, imageProcessor_1.deleteOldImageFile)(deletedImage);
+        }
         // Invalidar caché
         cache_1.cache.invalidate('products');
         cache_1.cache.invalidate('categories');

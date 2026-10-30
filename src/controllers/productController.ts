@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/database';
 import { cache } from '../utils/cache';
+import { processAnyImageInput, deleteOldImageFile } from '../utils/imageProcessor';
 
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text: string) => {
@@ -452,7 +453,9 @@ export const createProduct = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'El título del producto es obligatorio.' });
     }
 
-    const finalImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
+    const rawImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
+    // Conversión automática a formato WebP optimizado al 85%
+    const finalImage = await processAnyImageInput(rawImage, 'product', 85);
     const numDiscount = discount_price !== undefined && discount_price !== null && discount_price !== '' ? Number(discount_price) : null;
 
     // Normalizar opciones con precio y stock independiente (fuente de verdad obligatoria)
@@ -649,7 +652,14 @@ export const updateProduct = async (req: Request, res: Response) => {
     const finalDiscount = discount_price !== undefined ? Number(discount_price) : current.discount_price;
     let finalStock = stock !== undefined ? parseInt(stock, 10) : current.stock;
     if (isNaN(finalStock)) finalStock = 0;
-    const finalImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
+    const rawImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
+    // Conversión automática a formato WebP optimizado al 85%
+    const finalImage = await processAnyImageInput(rawImage, 'product', 85);
+
+    // Si la imagen cambió y la anterior era un archivo local, limpiar el archivo viejo
+    if (current.image_url && current.image_url !== finalImage) {
+      await deleteOldImageFile(current.image_url);
+    }
     let finalBadge: string | null = badge !== undefined ? (badge !== null ? String(badge).trim() : null) : current.badge;
     if (finalBadge === 'none' || (finalBadge && finalBadge.toLowerCase() === 'sin etiqueta') || finalBadge === '') {
       finalBadge = null;
@@ -813,14 +823,20 @@ export const deleteProduct = async (req: Request, res: Response) => {
 
     const isNumeric = /^\d+$/.test(id);
     const check = isNumeric
-      ? await pool.query('SELECT id, title FROM products WHERE id = $1', [parseInt(id, 10)])
-      : await pool.query('SELECT id, title FROM products WHERE slug = $1', [id]);
+      ? await pool.query('SELECT id, title, image_url FROM products WHERE id = $1', [parseInt(id, 10)])
+      : await pool.query('SELECT id, title, image_url FROM products WHERE slug = $1', [id]);
 
     if (check.rows.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado.' });
     }
 
+    const deletedImage = check.rows[0].image_url;
     await pool.query('DELETE FROM products WHERE id = $1', [check.rows[0].id]);
+
+    // Eliminar archivo local asociado si existía
+    if (deletedImage) {
+      await deleteOldImageFile(deletedImage);
+    }
 
     // Invalidar caché
     cache.invalidate('products');
