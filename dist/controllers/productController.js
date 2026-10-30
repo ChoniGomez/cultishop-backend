@@ -53,8 +53,29 @@ const normalizeStringArray = (val) => {
     }
     return [];
 };
+// Sanitizador y migrador en segundo plano de imágenes Base64 hacia archivos WebP
+const sanitizeAndMigrateImage = (imageUrl, productId) => {
+    if (!imageUrl || typeof imageUrl !== 'string')
+        return '';
+    const trimmed = imageUrl.trim();
+    if (!trimmed.startsWith('data:image/'))
+        return trimmed;
+    // Ruta WebP estática predecible
+    const targetWebp = `/uploads/product-${productId}.webp`;
+    // Disparar procesamiento asíncrono con Sharp para guardar el archivo físico en uploads/
+    (0, imageProcessor_1.processAnyImageInput)(trimmed, `product-${productId}`, 85)
+        .then((finalUrl) => {
+        if (finalUrl && finalUrl !== trimmed) {
+            database_1.pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [finalUrl, productId]).catch(() => { });
+        }
+    })
+        .catch(() => { });
+    return targetWebp;
+};
 // Helper común para formatear la fila del producto
 const formatProductRow = (row) => {
+    if (!row)
+        return null;
     let categoryName = row.category_name;
     let categorySlug = row.category_slug;
     let categoryId = row.category_id;
@@ -98,27 +119,86 @@ const formatProductRow = (row) => {
     const minPrice = variantPrices.length > 0 ? Math.min(...variantPrices) : defaultPrice;
     const maxPrice = variantPrices.length > 0 ? Math.max(...variantPrices) : defaultPrice;
     const totalStock = formattedOptions.reduce((acc, o) => acc + (Number(o.stock) || 0), 0);
+    // Sanitizar Base64 hacia URL WebP ultraligera
+    const cleanImage = sanitizeAndMigrateImage(row.image_url, row.id);
     return {
-        ...row,
+        id: row.id,
+        title: row.title,
+        slug: row.slug,
+        description: row.description,
         price: minPrice,
         min_price: minPrice,
         max_price: maxPrice,
+        discount_price: row.discount_price,
         stock: totalStock,
         total_stock: totalStock,
-        image: row.image_url,
+        image: cleanImage,
+        image_url: cleanImage,
+        badge: row.badge,
+        badge_type: row.badge_type,
+        is_active: row.is_active,
         category: categoryName || 'Varios',
         category_slug: categorySlug || '',
         category_id: categoryId || null,
         subcategory: subcategoryName || null,
         subcategory_slug: subcategorySlug || null,
         subcategory_id: subcategoryId || null,
+        brand: row.brand || null,
+        origin: row.origin || null,
+        format: row.format || null,
+        cultivation_stage: row.cultivation_stage || null,
+        dosage: row.dosage || null,
+        ph_recommended: row.ph_recommended || null,
+        ec_recommended: row.ec_recommended || null,
+        suitable_for: row.suitable_for || null,
         options: formattedOptions,
-        key_benefits: Array.isArray(row.key_benefits) ? row.key_benefits : parseJsonField(row.key_benefits, []),
-        application_guide: Array.isArray(row.application_guide) ? row.application_guide : parseJsonField(row.application_guide, []),
-        cannabis_specs: parseJsonField(row.cannabis_specs, null),
-        details: parseJsonField(row.details, null)
+        key_benefits: row.key_benefits !== undefined ? (Array.isArray(row.key_benefits) ? row.key_benefits : parseJsonField(row.key_benefits, [])) : undefined,
+        application_guide: row.application_guide !== undefined ? (Array.isArray(row.application_guide) ? row.application_guide : parseJsonField(row.application_guide, [])) : undefined,
+        cannabis_specs: row.cannabis_specs !== undefined ? parseJsonField(row.cannabis_specs, null) : undefined,
+        details: row.details !== undefined ? parseJsonField(row.details, null) : undefined,
+        shipping_info: row.shipping_info !== undefined ? row.shipping_info : undefined,
+        created_at: row.created_at,
+        updated_at: row.updated_at
     };
 };
+// Proyección ligera de campos para listados, home, catálogos y búsquedas (omite JSONB pesados)
+const SELECT_PRODUCT_SUMMARY_FIELDS = `
+  SELECT 
+    p.id,
+    p.title,
+    p.slug,
+    p.description,
+    p.price,
+    p.discount_price,
+    p.stock,
+    p.image_url,
+    p.badge,
+    p.badge_type,
+    p.options,
+    p.is_active,
+    p.category_id,
+    p.subcategory_id,
+    p.brand,
+    p.origin,
+    p.format,
+    c.name as category_name,
+    c.slug as category_slug,
+    c.parent_id as category_parent_id,
+    pcat.name as parent_category_name,
+    pcat.slug as parent_category_slug,
+    sub.name as subcategory_name,
+    sub.slug as subcategory_slug,
+    sub.parent_id as subcategory_parent_id,
+    sub_parent.name as sub_parent_name,
+    sub_parent.slug as sub_parent_slug,
+    p.created_at,
+    p.updated_at
+  FROM products p
+  LEFT JOIN categories c ON p.category_id = c.id
+  LEFT JOIN categories pcat ON c.parent_id = pcat.id
+  LEFT JOIN categories sub ON p.subcategory_id = sub.id
+  LEFT JOIN categories sub_parent ON sub.parent_id = sub_parent.id
+`;
 const SELECT_PRODUCT_FIELDS = `
   SELECT 
     p.id,
@@ -274,7 +354,7 @@ const getProducts = async (req, res) => {
             limitClause = `LIMIT $${paramIndex++}`;
         }
         const result = await database_1.pool.query(`
-      ${SELECT_PRODUCT_FIELDS}
+      ${SELECT_PRODUCT_SUMMARY_FIELDS}
       ${whereClause}
       ${orderByClause}
       ${limitClause}

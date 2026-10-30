@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { pool } from './database';
 import { seedDefaultAboutSections } from '../controllers/aboutController';
 import { seedDefaultInstagramVideos } from '../controllers/instagramController';
+import { processAnyImageInput } from '../utils/imageProcessor';
 
 export const ADMIN_EMAIL = 'chonidacharygomez@gmail.com';
 export const ADMIN_DEFAULT_PASSWORD = '15525503pololo';
@@ -75,6 +76,14 @@ export async function initDb() {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS shipping_info TEXT;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS details JSONB;
       CREATE INDEX IF NOT EXISTS idx_products_subcategory_id ON products(subcategory_id);
+      CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+      CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
+      CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, is_active);
+      CREATE INDEX IF NOT EXISTS idx_products_sub_active ON products(subcategory_id, is_active);
+      CREATE INDEX IF NOT EXISTS idx_products_slug ON products(slug);
+      CREATE INDEX IF NOT EXISTS idx_categories_slug ON categories(slug);
+      CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);
+      CREATE INDEX IF NOT EXISTS idx_categories_visible ON categories(is_visible);
     `);
   });
 
@@ -434,6 +443,31 @@ export async function initDb() {
          )`,
         [imgUrl, prodId]
       );
+    }
+  });
+
+  // 6. Optimización automática en segundo plano de imágenes Base64 hacia archivos WebP
+  safeStep('migrate_base64_webp', async () => {
+    try {
+      const base64Rows = await pool.query(
+        "SELECT id, image_url FROM products WHERE image_url LIKE 'data:image%' LIMIT 700"
+      );
+      if (base64Rows.rows.length > 0) {
+        console.log(`[initDb] Optimizando ${base64Rows.rows.length} imágenes Base64 residuales a WebP...`);
+        for (const row of base64Rows.rows) {
+          try {
+            const webpUrl = await processAnyImageInput(row.image_url, `product-${row.id}`, 85);
+            if (webpUrl && webpUrl !== row.image_url) {
+              await pool.query('UPDATE products SET image_url = $1 WHERE id = $2', [webpUrl, row.id]);
+            }
+          } catch (err: any) {
+            // Continuar con el siguiente registro
+          }
+        }
+        console.log('[initDb] Optimización de imágenes a WebP completada.');
+      }
+    } catch (e: any) {
+      console.warn('[initDb] Aviso en migrate_base64_webp:', e?.message || e);
     }
   });
 }
