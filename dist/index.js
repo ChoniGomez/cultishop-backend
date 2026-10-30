@@ -38,10 +38,12 @@ const staticOptions = {
 app.use('/uploads', express_1.default.static(imageProcessor_1.UPLOADS_DIR, staticOptions));
 app.use('/uploads', express_1.default.static(path_1.default.resolve(process.cwd(), 'uploads'), staticOptions));
 app.use('/uploads', express_1.default.static(path_1.default.resolve(process.cwd(), 'backend', 'uploads'), staticOptions));
+app.use('/uploads', express_1.default.static('uploads', staticOptions));
 // 2. Exponer idénticamente bajo /api/uploads para compatibilidad directa con proxies Nginx configurados en /api/
 app.use('/api/uploads', express_1.default.static(imageProcessor_1.UPLOADS_DIR, staticOptions));
 app.use('/api/uploads', express_1.default.static(path_1.default.resolve(process.cwd(), 'uploads'), staticOptions));
 app.use('/api/uploads', express_1.default.static(path_1.default.resolve(process.cwd(), 'backend', 'uploads'), staticOptions));
+app.use('/api/uploads', express_1.default.static('uploads', staticOptions));
 // Píxel WebP transparente 1x1 (26 bytes) para contingencia garantizando que NUNCA se retorne text/html
 const TRANSPARENT_WEBP_1X1 = Buffer.from('UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAQAcJaACdLoB+AAAAAD+/uWAAA==', 'base64');
 // Manejador dinámico on-demand para generar y servir imágenes WebP si aún no están en disco físico

@@ -38,11 +38,13 @@ const staticOptions = {
 app.use('/uploads', express.static(UPLOADS_DIR, staticOptions));
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads'), staticOptions));
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'backend', 'uploads'), staticOptions));
+app.use('/uploads', express.static('uploads', staticOptions));
 
 // 2. Exponer idénticamente bajo /api/uploads para compatibilidad directa con proxies Nginx configurados en /api/
 app.use('/api/uploads', express.static(UPLOADS_DIR, staticOptions));
 app.use('/api/uploads', express.static(path.resolve(process.cwd(), 'uploads'), staticOptions));
 app.use('/api/uploads', express.static(path.resolve(process.cwd(), 'backend', 'uploads'), staticOptions));
+app.use('/api/uploads', express.static('uploads', staticOptions));
 
 // Píxel WebP transparente 1x1 (26 bytes) para contingencia garantizando que NUNCA se retorne text/html
 const TRANSPARENT_WEBP_1X1 = Buffer.from(
