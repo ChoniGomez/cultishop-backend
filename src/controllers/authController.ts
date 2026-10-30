@@ -156,7 +156,7 @@ export const googleAuth = async (req: Request, res: Response) => {
       console.warn('Verificación directa con Google Client falló, intentando fallback tokeninfo...');
     }
 
-    // 2. Fallback: verificar con el endpoint oficial de Google tokeninfo
+    // 2. Fallback: verificar con el endpoint oficial de Google tokeninfo (para id_token)
     if (!payload) {
       try {
         const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
@@ -168,7 +168,29 @@ export const googleAuth = async (req: Request, res: Response) => {
       }
     }
 
-    // 3. Fallback: decodificar payload JWT directamente
+    // 3. Fallback: verificar con Google userinfo endpoint (para access_token de OAuth 2.0 por redirección)
+    if (!payload) {
+      try {
+        const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${credential}` }
+        });
+        if (userinfoRes.ok) {
+          payload = await userinfoRes.json();
+        }
+      } catch (userinfoErr) {}
+    }
+
+    // 4. Fallback: verificar con Google tokeninfo por access_token
+    if (!payload) {
+      try {
+        const tokeninfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${credential}`);
+        if (tokeninfoRes.ok) {
+          payload = await tokeninfoRes.json();
+        }
+      } catch (tokeninfoErr) {}
+    }
+
+    // 5. Fallback: decodificar payload JWT directamente
     if (!payload) {
       try {
         const decoded = jwt.decode(credential) as any;
