@@ -131,7 +131,7 @@ export async function initDb() {
         ),
         (
           'VISITANOS EN NUESTRO LOCAL • HORARIOS DE ATENCIÓN',
-          'Av. López y Planes casi Lavalle ("adentro del ACUARIUM") • Posadas, Misiones. Vení a conocer todo nuestro catálogo con asesoramiento profesional.',
+          'Av. López y Planes casi Lavalle (adentro del ACUARIUM), Posadas, Misiones. Vení a conocer todo nuestro catálogo con asesoramiento profesional.',
           'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=1800',
           'https://maps.google.com/?q=Av.+López+y+Planes+y+Lavalle,+Posadas',
           'Cómo Llegar (Google Maps)',
@@ -167,7 +167,7 @@ export async function initDb() {
 
       INSERT INTO settings (key, value) VALUES (
         'location',
-        '{"store_address": "Av. López y Planes casi Lavalle (\\"adentro del ACUARIUM\\")", "store_city": "Posadas, Misiones", "store_hours": "Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs", "store_phone": "+54 9 376 435-6995", "google_maps_url": "https://maps.google.com/?q=Av.+López+y+Planes+y+Lavalle,+Posadas", "google_maps_embed_url": "https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+y+Lavalle,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed"}'::jsonb
+        '{"store_address": "Av. López y Planes casi Lavalle (adentro del ACUARIUM), Posadas, Misiones", "store_city": "Posadas, Misiones", "store_hours": "Lunes a Sábado de 09:00 a 13:00 y de 16:30 a 20:30 hs", "store_phone": "+54 9 376 435-6995", "google_maps_url": "https://maps.google.com/?q=Av.+López+y+Planes+y+Lavalle,+Posadas", "google_maps_embed_url": "https://maps.google.com/maps?q=Av.+L%C3%B3pez+y+Planes+y+Lavalle,+Posadas,+Misiones,+Argentina&t=&z=16&ie=UTF8&iwloc=&output=embed"}'::jsonb
       ) ON CONFLICT (key) DO NOTHING;
     `);
   });
@@ -211,14 +211,14 @@ export async function initDb() {
         ),
         (
           '¿Cuáles son los métodos de envío y retiro disponibles?',
-          'Disponemos de las siguientes modalidades de entrega:\n• Retiro por Local sin costo en Av. López y Planes casi Lavalle ("adentro del ACUARIUM"), Posadas, Misiones.\n• Envíos locales (Posadas / Garupá): Coordinación ágil de envío por moto, Uber o Líder Mandados.\n• Envíos Nacionales: Realizamos envíos a todo el país por Correo Argentino o Vía Cargo. Tené en cuenta que el envío nacional tiene un costo adicional que dependerá del lugar de destino.',
+          'Disponemos de las siguientes modalidades de entrega:\n• Retiro por Local sin costo en Av. López y Planes casi Lavalle (adentro del ACUARIUM), Posadas, Misiones.\n• Envíos locales (Posadas / Garupá): Coordinación ágil de envío por moto, Uber o Líder Mandados.\n• Envíos Nacionales: Realizamos envíos a todo el país por Correo Argentino o Vía Cargo. Tené en cuenta que el envío nacional tiene un costo adicional que dependerá del lugar de destino.',
           'Envíos & Retiro',
           2,
           true
         ),
         (
           '¿Dónde queda el local físico y cuáles son los horarios de atención?',
-          'Estamos ubicados en Av. López y Planes casi Lavalle ("adentro del ACUARIUM"), Posadas, Misiones. Te invitamos a visitarnos para conocer todos los productos exhibidos y recibir asesoramiento técnico personalizado para tus cultivos.',
+          'Estamos ubicados en Av. López y Planes casi Lavalle (adentro del ACUARIUM), Posadas, Misiones. Te invitamos a visitarnos para conocer todos los productos exhibidos y recibir asesoramiento técnico personalizado para tus cultivos.',
           'Local & Retiro',
           3,
           true

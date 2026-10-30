@@ -33,7 +33,7 @@ export const DEFAULT_INSTAGRAM_VIDEOS = [
   },
   {
     id: 4,
-    title: 'Recorrido por nuestro local oficial en Posadas • Av. López y Planes casi Lavalle ("adentro del ACUARIUM")',
+    title: 'Recorrido por nuestro local oficial en Posadas • Av. López y Planes casi Lavalle (adentro del ACUARIUM), Posadas, Misiones',
     post_url: 'https://www.instagram.com/culti.shopp/',
     thumbnail_url: 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=800',
     order_index: 4,

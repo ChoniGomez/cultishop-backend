@@ -108,7 +108,7 @@ export const createOrder = async (req: AuthenticatedRequest, res: Response) => {
     // Formatear dirección limpia y consolidada
     const formattedAddress = street_address 
       ? `${street_address}${apartment ? ', Depto/Piso: ' + apartment : ''}, ${city || ''}, ${state || ''} (CP: ${postal_code || ''}), ${country}`
-      : (shipping_address || 'Retiro en Local Oficial - Av. López y Planes casi Lavalle ("adentro del ACUARIUM"), Posadas, Misiones');
+      : (shipping_address || 'Retiro en Local Oficial - Av. López y Planes casi Lavalle (adentro del ACUARIUM), Posadas, Misiones');
 
     const itemsJson = JSON.stringify(items);
 
