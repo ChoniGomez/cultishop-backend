@@ -20,6 +20,7 @@ const aboutRoutes_1 = __importDefault(require("./routes/aboutRoutes"));
 const instagramRoutes_1 = __importDefault(require("./routes/instagramRoutes"));
 const faqRoutes_1 = __importDefault(require("./routes/faqRoutes"));
 const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
+const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const initDb_1 = require("./config/initDb");
 const imageProcessor_1 = require("./utils/imageProcessor");
 dotenv_1.default.config();
@@ -115,6 +116,7 @@ app.use('/api/about', aboutRoutes_1.default);
 app.use('/api/instagram', instagramRoutes_1.default);
 app.use('/api/faqs', faqRoutes_1.default);
 app.use('/api/upload', uploadRoutes_1.default);
+app.use('/api/admin', adminRoutes_1.default);
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });
 });
