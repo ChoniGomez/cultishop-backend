@@ -263,7 +263,7 @@ const SELECT_PRODUCT_FIELDS = `
  */
 const getProducts = async (req, res) => {
     try {
-        const { category, category_id, subcategory, subcategory_id, search, all, limit, sort, featured } = req.query;
+        const { category, category_id, subcategory, subcategory_id, search, all, limit, page, sort, featured } = req.query;
         const cacheKey = `products:${JSON.stringify(req.query)}`;
         const cached = cache_1.cache.get(cacheKey);
         if (cached) {
@@ -347,6 +347,26 @@ const getProducts = async (req, res) => {
             }
         }
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        // Conteo total para metadatos de paginación
+        const countSql = `
+      SELECT COUNT(*)::int AS total
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN categories pcat ON c.parent_id = pcat.id
+      LEFT JOIN categories sub ON p.subcategory_id = sub.id
+      LEFT JOIN categories sub_parent ON sub.parent_id = sub_parent.id
+      ${whereClause}
+    `;
+        const countResult = await database_1.pool.query(countSql, [...queryParams]);
+        const total = parseInt(countResult.rows[0]?.total, 10) || 0;
+        // Configuración de paginación (skip y take / OFFSET y LIMIT)
+        const isUnlimited = limit === 'all' || limit === 'unlimited';
+        const pageNumber = Math.max(1, parseInt(String(page || 1), 10));
+        // Por defecto 50 productos por página como requiere la especificación
+        const pageSize = isUnlimited ? Math.max(1, total) : Math.max(1, Math.min(200, parseInt(String(limit || 50), 10)));
+        const skip = (pageNumber - 1) * pageSize;
+        const take = pageSize;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
         let orderByClause = 'ORDER BY p.id ASC';
         if (featured === 'true' || sort === 'featured') {
             orderByClause = `ORDER BY 
@@ -359,20 +379,32 @@ const getProducts = async (req, res) => {
         else if (sort === 'recent' || sort === 'newest' || sort === 'desc') {
             orderByClause = 'ORDER BY p.id DESC';
         }
-        let limitClause = '';
-        if (limit && !isNaN(Number(limit))) {
-            const parsedLimit = Math.max(1, Math.min(100, parseInt(String(limit), 10)));
-            queryParams.push(parsedLimit);
-            limitClause = `LIMIT $${paramIndex++}`;
+        let paginationClause = '';
+        if (!isUnlimited) {
+            queryParams.push(take);
+            const limitParamIdx = paramIndex++;
+            queryParams.push(skip);
+            const offsetParamIdx = paramIndex++;
+            paginationClause = `LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`;
         }
         const result = await database_1.pool.query(`
       ${SELECT_PRODUCT_SUMMARY_FIELDS}
       ${whereClause}
       ${orderByClause}
-      ${limitClause}
+      ${paginationClause}
     `, queryParams);
         const products = result.rows.map(formatProductRow);
-        const responseData = { products };
+        const meta = {
+            total,
+            page: pageNumber,
+            limit: pageSize,
+            totalPages
+        };
+        const responseData = {
+            data: products,
+            products,
+            meta
+        };
         // Caché en memoria por 60 segundos
         cache_1.cache.set(cacheKey, responseData, 60);
         return res.json(responseData);
