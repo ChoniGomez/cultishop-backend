@@ -487,7 +487,7 @@ export const getProducts = async (req: Request, res: Response) => {
 export const getProductById = async (req: Request, res: Response) => {
   try {
     const rawId = req.params.id;
-    if (!rawId || !String(rawId).trim()) {
+    if (!rawId || !String(rawId).trim() || rawId === 'undefined' || rawId === 'null') {
       return res.status(400).json({ error: 'Identificador de producto no válido.' });
     }
 
@@ -504,9 +504,17 @@ export const getProductById = async (req: Request, res: Response) => {
     if (isNumeric) {
       const numId = parseInt(cleanId, 10);
       result = await pool.query(
-        `${SELECT_PRODUCT_FIELDS} WHERE p.id = $1 OR LOWER(p.slug) = LOWER($2) LIMIT 1`,
-        [numId, cleanId]
+        `${SELECT_PRODUCT_FIELDS} WHERE p.id = $1 LIMIT 1`,
+        [numId]
       );
+
+      // Si no se encontró por ID numérico directo, intentar por slug exacto
+      if (result.rows.length === 0) {
+        result = await pool.query(
+          `${SELECT_PRODUCT_FIELDS} WHERE LOWER(p.slug) = LOWER($1) LIMIT 1`,
+          [cleanId]
+        );
+      }
     } else {
       // Coincidencia insensible a mayúsculas/minúsculas por slug
       result = await pool.query(
@@ -514,15 +522,17 @@ export const getProductById = async (req: Request, res: Response) => {
         [cleanId]
       );
 
-      // Si no se encontró por slug directo, verificar si tiene prefijo numérico (ej: "676-top-crop")
+      // Si no se encontró por slug directo, verificar si tiene prefijo numérico (ej: "677-nombre")
       if (result.rows.length === 0) {
         const prefixMatch = cleanId.match(/^(\d+)(?:-|_|$)/);
         if (prefixMatch) {
           const prefixId = parseInt(prefixMatch[1], 10);
-          result = await pool.query(
-            `${SELECT_PRODUCT_FIELDS} WHERE p.id = $1 LIMIT 1`,
-            [prefixId]
-          );
+          if (!isNaN(prefixId)) {
+            result = await pool.query(
+              `${SELECT_PRODUCT_FIELDS} WHERE p.id = $1 LIMIT 1`,
+              [prefixId]
+            );
+          }
         }
       }
     }
@@ -532,6 +542,10 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 
     const product = formatProductRow(result.rows[0]);
+    if (!product) {
+      return res.status(404).json({ error: 'Insumo no encontrado en el inventario.' });
+    }
+
     const responseData = { 
       success: true,
       product,
