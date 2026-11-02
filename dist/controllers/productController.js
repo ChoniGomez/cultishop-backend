@@ -133,6 +133,33 @@ const formatProductRow = (row) => {
     const totalStock = formattedOptions.reduce((acc, o) => acc + (Number(o.stock) || 0), 0);
     // Sanitizar Base64 hacia URL WebP ultraligera
     const cleanImage = sanitizeAndMigrateImage(row.image_url, row.id);
+    // Extraer y normalizar galería de múltiples imágenes
+    let rawImagesList = [];
+    if (row.images) {
+        if (Array.isArray(row.images)) {
+            rawImagesList = row.images;
+        }
+        else if (typeof row.images === 'string') {
+            try {
+                const parsed = JSON.parse(row.images);
+                if (Array.isArray(parsed))
+                    rawImagesList = parsed;
+            }
+            catch { }
+        }
+    }
+    const cleanImages = rawImagesList
+        .map((img) => {
+        const imgStr = typeof img === 'string' ? img.trim() : (img?.url ? String(img.url).trim() : '');
+        return imgStr;
+    })
+        .filter(Boolean);
+    if (cleanImage && !cleanImages.includes(cleanImage)) {
+        cleanImages.unshift(cleanImage);
+    }
+    else if (cleanImages.length === 0 && cleanImage) {
+        cleanImages.push(cleanImage);
+    }
     return {
         id: row.id,
         title: row.title,
@@ -144,8 +171,9 @@ const formatProductRow = (row) => {
         discount_price: row.discount_price,
         stock: totalStock,
         total_stock: totalStock,
-        image: cleanImage,
-        image_url: cleanImage,
+        image: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : ''),
+        image_url: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : ''),
+        images: cleanImages,
         badge: row.badge,
         badge_type: row.badge_type,
         is_active: row.is_active,
@@ -184,6 +212,7 @@ const SELECT_PRODUCT_SUMMARY_FIELDS = `
     p.discount_price,
     p.stock,
     p.image_url,
+    p.images,
     p.badge,
     p.badge_type,
     p.options,
@@ -221,6 +250,7 @@ const SELECT_PRODUCT_FIELDS = `
     p.discount_price,
     p.stock,
     p.image_url,
+    p.images,
     p.badge,
     p.badge_type,
     p.options,
@@ -489,13 +519,53 @@ const resolveCategories = async (category_id, category, subcategory_id, subcateg
  */
 const createProduct = async (req, res) => {
     try {
-        const { title, description, price, discount_price, stock = 10, image_url, image, category, category_id, subcategory, subcategory_id, badge = 'STOCK DISPONIBLE', badge_type = 'gold', options = ['Estándar'], brand, origin, format, cultivation_stage, dosage, ph_recommended, ec_recommended, suitable_for, key_benefits, application_guide, cannabis_specs, shipping_info, details } = req.body;
+        const { title, description, price, discount_price, stock = 10, image_url, image, images, category, category_id, subcategory, subcategory_id, badge = 'STOCK DISPONIBLE', badge_type = 'gold', options = ['Estándar'], brand, origin, format, cultivation_stage, dosage, ph_recommended, ec_recommended, suitable_for, key_benefits, application_guide, cannabis_specs, shipping_info, details } = req.body;
         if (!title || !String(title).trim()) {
             return res.status(400).json({ error: 'El título del producto es obligatorio.' });
         }
-        const rawImage = image_url || image || 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
-        // Conversión automática a formato WebP optimizado al 85%
-        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'product', 85);
+        // 1. Recopilar candidatos de múltiples imágenes (Multer req.files + req.body.images + image_url)
+        let rawImagesList = [];
+        if (images) {
+            if (Array.isArray(images)) {
+                rawImagesList.push(...images);
+            }
+            else if (typeof images === 'string') {
+                try {
+                    const parsed = JSON.parse(images);
+                    if (Array.isArray(parsed))
+                        rawImagesList.push(...parsed);
+                    else if (images.trim())
+                        rawImagesList.push(images.trim());
+                }
+                catch {
+                    if (images.trim())
+                        rawImagesList.push(images.trim());
+                }
+            }
+        }
+        const multerUploaded = req.uploadedImages || [];
+        if (Array.isArray(multerUploaded) && multerUploaded.length > 0) {
+            rawImagesList.push(...multerUploaded);
+        }
+        if (rawImagesList.length === 0) {
+            if (image_url && typeof image_url === 'string')
+                rawImagesList.push(image_url.trim());
+            if (image && typeof image === 'string')
+                rawImagesList.push(image.trim());
+        }
+        if (rawImagesList.length === 0) {
+            rawImagesList.push('https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600');
+        }
+        const uniqueRawImages = Array.from(new Set(rawImagesList.map(img => String(img).trim()).filter(Boolean)));
+        const processedImages = [];
+        for (const raw of uniqueRawImages) {
+            const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85);
+            if (webpUrl && !processedImages.includes(webpUrl)) {
+                processedImages.push(webpUrl);
+            }
+        }
+        const finalImage = processedImages[0] || '';
+        const imagesJson = JSON.stringify(processedImages);
         const numDiscount = discount_price !== undefined && discount_price !== null && discount_price !== '' ? Number(discount_price) : null;
         // Normalizar opciones con precio y stock independiente (fuente de verdad obligatoria)
         let normalizedOptions = [];
@@ -559,15 +629,15 @@ const createProduct = async (req, res) => {
         const detailsJson = details ? JSON.stringify(details) : null;
         const insertResult = await database_1.pool.query(`
       INSERT INTO products (
-        title, slug, description, price, discount_price, stock, image_url, 
+        title, slug, description, price, discount_price, stock, image_url, images,
         badge, badge_type, options, category_id, subcategory_id, is_active,
         brand, origin, format, cultivation_stage, dosage, ph_recommended, ec_recommended,
         suitable_for, key_benefits, application_guide, cannabis_specs, shipping_info, details
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, 
-        $8, $9, $10, $11, $12, true,
-        $13, $14, $15, $16, $17, $18, $19,
-        $20, $21, $22, $23, $24, $25
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, true,
+        $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24, $25, $26
       )
       RETURNING id
     `, [
@@ -578,6 +648,7 @@ const createProduct = async (req, res) => {
             numDiscount,
             numStock,
             finalImage,
+            imagesJson,
             finalBadge,
             finalBadgeType,
             optionsJson,
@@ -620,7 +691,7 @@ exports.createProduct = createProduct;
 const updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, price, discount_price, stock, image_url, image, category, category_id, subcategory, subcategory_id, badge, badge_type, options, brand, origin, format, cultivation_stage, dosage, ph_recommended, ec_recommended, suitable_for, key_benefits, application_guide, cannabis_specs, shipping_info, details, is_active } = req.body;
+        const { title, description, price, discount_price, stock, image_url, image, images, category, category_id, subcategory, subcategory_id, badge, badge_type, options, brand, origin, format, cultivation_stage, dosage, ph_recommended, ec_recommended, suitable_for, key_benefits, application_guide, cannabis_specs, shipping_info, details, is_active } = req.body;
         const isNumeric = /^\d+$/.test(id);
         const existingCheck = isNumeric
             ? await database_1.pool.query('SELECT * FROM products WHERE id = $1', [parseInt(id, 10)])
@@ -639,10 +710,58 @@ const updateProduct = async (req, res) => {
         let finalStock = stock !== undefined ? parseInt(stock, 10) : current.stock;
         if (isNaN(finalStock))
             finalStock = 0;
-        const rawImage = (image_url || image) !== undefined ? (image_url || image) : current.image_url;
-        // Conversión automática a formato WebP optimizado al 85%
-        const finalImage = await (0, imageProcessor_1.processAnyImageInput)(rawImage, 'product', 85);
-        // Si la imagen cambió y la anterior era un archivo local, limpiar el archivo viejo
+        // Procesar galería de múltiples imágenes si se enviaron cambios
+        let finalImagesJson = current.images;
+        let finalImage = current.image_url;
+        const multerUploaded = req.uploadedImages || [];
+        const hasImagesUpdate = images !== undefined || image_url !== undefined || image !== undefined || multerUploaded.length > 0;
+        if (hasImagesUpdate) {
+            let candidateImages = [];
+            if (images !== undefined) {
+                if (Array.isArray(images)) {
+                    candidateImages.push(...images);
+                }
+                else if (typeof images === 'string') {
+                    try {
+                        const parsed = JSON.parse(images);
+                        if (Array.isArray(parsed))
+                            candidateImages.push(...parsed);
+                        else if (images.trim())
+                            candidateImages.push(images.trim());
+                    }
+                    catch {
+                        if (images.trim())
+                            candidateImages.push(images.trim());
+                    }
+                }
+            }
+            if (multerUploaded.length > 0) {
+                candidateImages.push(...multerUploaded);
+            }
+            if (candidateImages.length === 0) {
+                if (image_url !== undefined && typeof image_url === 'string' && image_url.trim()) {
+                    candidateImages.push(image_url.trim());
+                }
+                if (image !== undefined && typeof image === 'string' && image.trim()) {
+                    candidateImages.push(image.trim());
+                }
+            }
+            const uniqueCandidates = Array.from(new Set(candidateImages.map(img => String(img).trim()).filter(Boolean)));
+            if (uniqueCandidates.length > 0) {
+                const processedImages = [];
+                for (const raw of uniqueCandidates) {
+                    const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85);
+                    if (webpUrl && !processedImages.includes(webpUrl)) {
+                        processedImages.push(webpUrl);
+                    }
+                }
+                if (processedImages.length > 0) {
+                    finalImage = processedImages[0];
+                    finalImagesJson = JSON.stringify(processedImages);
+                }
+            }
+        }
+        // Si la imagen principal cambió y la anterior era un archivo local, limpiar el archivo viejo
         if (current.image_url && current.image_url !== finalImage) {
             await (0, imageProcessor_1.deleteOldImageFile)(current.image_url);
         }
@@ -724,27 +843,28 @@ const updateProduct = async (req, res) => {
         discount_price = $4,
         stock = $5,
         image_url = $6,
-        badge = $7,
-        badge_type = $8,
-        options = $9,
-        category_id = $10,
-        subcategory_id = $11,
-        brand = $12,
-        origin = $13,
-        format = $14,
-        cultivation_stage = $15,
-        dosage = $16,
-        ph_recommended = $17,
-        ec_recommended = $18,
-        suitable_for = $19,
-        key_benefits = $20,
-        application_guide = $21,
-        cannabis_specs = $22,
-        shipping_info = $23,
-        details = $24,
-        is_active = $25,
+        images = $7,
+        badge = $8,
+        badge_type = $9,
+        options = $10,
+        category_id = $11,
+        subcategory_id = $12,
+        brand = $13,
+        origin = $14,
+        format = $15,
+        cultivation_stage = $16,
+        dosage = $17,
+        ph_recommended = $18,
+        ec_recommended = $19,
+        suitable_for = $20,
+        key_benefits = $21,
+        application_guide = $22,
+        cannabis_specs = $23,
+        shipping_info = $24,
+        details = $25,
+        is_active = $26,
         updated_at = NOW()
-      WHERE id = $26
+      WHERE id = $27
     `, [
             finalTitle,
             finalDescription,
@@ -752,6 +872,7 @@ const updateProduct = async (req, res) => {
             finalDiscount,
             finalStock,
             finalImage,
+            finalImagesJson,
             finalBadge,
             finalBadgeType,
             finalOptionsJson,

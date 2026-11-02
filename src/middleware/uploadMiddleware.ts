@@ -62,3 +62,49 @@ export const convertUploadToWebp = (prefix: string = 'img') => {
   };
 };
 
+/**
+ * Middleware que intercepta múltiples imágenes subidas con Multer (req.files o req.file),
+ * las procesa secuencialmente a WebP al 85% y adjunta la lista de URLs generadas a (req as any).uploadedImages.
+ */
+export const convertMultipleUploadsToWebp = (prefix: string = 'product') => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    let filesToProcess: Express.Multer.File[] = [];
+
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      filesToProcess = req.files as Express.Multer.File[];
+    } else if (req.files && typeof req.files === 'object') {
+      const dict = req.files as { [fieldname: string]: Express.Multer.File[] };
+      Object.values(dict).forEach((arr) => {
+        if (Array.isArray(arr)) filesToProcess.push(...arr);
+      });
+    } else if (req.file) {
+      filesToProcess = [req.file];
+    }
+
+    if (filesToProcess.length === 0) {
+      return next();
+    }
+
+    try {
+      const processedUrls: string[] = [];
+      for (const file of filesToProcess) {
+        if (file.buffer) {
+          const processed = await processBufferToWebp(file.buffer, prefix, 85);
+          file.filename = processed.filename;
+          file.path = processed.url;
+          file.mimetype = 'image/webp';
+          processedUrls.push(processed.url);
+        }
+      }
+
+      (req as any).uploadedImages = processedUrls;
+      next();
+    } catch (error: any) {
+      console.error('Error en middleware convertMultipleUploadsToWebp:', error);
+      return res.status(400).json({
+        error: `Error al procesar y convertir las imágenes a WebP: ${error.message || error}`
+      });
+    }
+  };
+};
+

@@ -78,6 +78,7 @@ async function initDb() {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS cannabis_specs JSONB;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS shipping_info TEXT;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS details JSONB;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb;
       CREATE INDEX IF NOT EXISTS idx_products_subcategory_id ON products(subcategory_id);
       CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
       CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
