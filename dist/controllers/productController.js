@@ -446,34 +446,54 @@ const getProducts = async (req, res) => {
 };
 exports.getProducts = getProducts;
 /**
- * Obtener producto por ID o slug
+ * Obtener producto por ID o slug con soporte dual numérico y textual
  */
 const getProductById = async (req, res) => {
     try {
-        const { id } = req.params;
-        const cacheKey = `products:item:${id}`;
+        const rawId = req.params.id;
+        if (!rawId || !String(rawId).trim()) {
+            return res.status(400).json({ error: 'Identificador de producto no válido.' });
+        }
+        const cleanId = String(rawId).trim();
+        const cacheKey = `products:item:${cleanId.toLowerCase()}`;
         const cached = cache_1.cache.get(cacheKey);
         if (cached) {
             return res.json(cached);
         }
-        const isNumeric = /^\d+$/.test(id);
-        const param = isNumeric ? parseInt(id, 10) : id;
-        const query = isNumeric
-            ? `${SELECT_PRODUCT_FIELDS} WHERE p.id = $1`
-            : `${SELECT_PRODUCT_FIELDS} WHERE p.slug = $1`;
-        const result = await database_1.pool.query(query, [param]);
+        const isNumeric = /^\d+$/.test(cleanId);
+        let result;
+        if (isNumeric) {
+            const numId = parseInt(cleanId, 10);
+            result = await database_1.pool.query(`${SELECT_PRODUCT_FIELDS} WHERE p.id = $1 OR LOWER(p.slug) = LOWER($2) LIMIT 1`, [numId, cleanId]);
+        }
+        else {
+            // Coincidencia insensible a mayúsculas/minúsculas por slug
+            result = await database_1.pool.query(`${SELECT_PRODUCT_FIELDS} WHERE LOWER(p.slug) = LOWER($1) OR p.slug = $1 LIMIT 1`, [cleanId]);
+            // Si no se encontró por slug directo, verificar si tiene prefijo numérico (ej: "676-top-crop")
+            if (result.rows.length === 0) {
+                const prefixMatch = cleanId.match(/^(\d+)(?:-|_|$)/);
+                if (prefixMatch) {
+                    const prefixId = parseInt(prefixMatch[1], 10);
+                    result = await database_1.pool.query(`${SELECT_PRODUCT_FIELDS} WHERE p.id = $1 LIMIT 1`, [prefixId]);
+                }
+            }
+        }
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Producto no encontrado.' });
+            return res.status(404).json({ error: 'Insumo no encontrado en el inventario.' });
         }
         const product = formatProductRow(result.rows[0]);
-        const responseData = { product };
+        const responseData = {
+            success: true,
+            product,
+            data: product
+        };
         // Caché individual por 60 segundos
         cache_1.cache.set(cacheKey, responseData, 60);
         return res.json(responseData);
     }
     catch (error) {
         console.error('Error en getProductById:', error);
-        return res.status(500).json({ error: 'Error al consultar producto.' });
+        return res.status(500).json({ error: 'Error al consultar producto en el servidor.' });
     }
 };
 exports.getProductById = getProductById;
