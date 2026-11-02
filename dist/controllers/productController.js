@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProductById = exports.getProducts = void 0;
+exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProductById = exports.getFeaturedProducts = exports.getProducts = void 0;
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const database_1 = require("../config/database");
@@ -177,6 +177,7 @@ const formatProductRow = (row) => {
         badge: row.badge,
         badge_type: row.badge_type,
         is_active: row.is_active,
+        is_featured: row.is_featured === true || Boolean(row.is_featured) || (row.badge && /destacad/i.test(row.badge)),
         category: categoryName || 'Varios',
         category_slug: categorySlug || '',
         category_id: categoryId || null,
@@ -294,6 +295,10 @@ const SELECT_PRODUCT_FIELDS = `
 const getProducts = async (req, res) => {
     try {
         const { category, category_id, subcategory, subcategory_id, search, all, limit, page, sort, featured } = req.query;
+        // Delegar al selector dinámico con jerarquía y aleatoriedad si se solicita featured=true
+        if (featured === 'true' || sort === 'featured') {
+            return (0, exports.getFeaturedProducts)(req, res);
+        }
         const cacheKey = `products:${JSON.stringify(req.query)}`;
         const cached = cache_1.cache.get(cacheKey);
         if (cached) {
@@ -445,6 +450,172 @@ const getProducts = async (req, res) => {
     }
 };
 exports.getProducts = getProducts;
+/**
+ * Helper de barajado aleatorio (Fisher-Yates) para Node.js
+ */
+const shuffleArray = (array) => {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+};
+/**
+ * Helper para verificar si un producto cuenta con stock disponible
+ */
+const checkProductHasStock = (prod) => {
+    if (!prod)
+        return false;
+    const badgeStr = String(prod.badge || '').toUpperCase();
+    if (badgeStr === 'SIN STOCK')
+        return false;
+    if (typeof prod.stock === 'number' && prod.stock > 0)
+        return true;
+    if (Array.isArray(prod.options) && prod.options.some((o) => Number(o?.stock) > 0))
+        return true;
+    return Number(prod.stock) > 0;
+};
+/**
+ * Endpoint para productos destacados y novedades de la página principal (Home)
+ *
+ * Implementa la jerarquía comercial solicitada:
+ * 1ª Prioridad: Productos marcados explícitamente como "destacados" (is_featured = true o badges TOP VENTAS / DESTACADO / OFERTA).
+ * 2ª Prioridad: Productos con etiqueta "nuevo ingreso" o los más recientes incorporados al catálogo.
+ * 3ª Prioridad: Productos con stock disponible para asegurar disponibilidad inmediata.
+ *
+ * Factor de aleatoriedad (Fisher-Yates):
+ * En cada visita o recarga, se barajan los candidatos de cada nivel para generar
+ * una combinación comercial fresca, dinámica y no estática.
+ */
+const getFeaturedProducts = async (req, res) => {
+    try {
+        const rawLimit = req.query.limit;
+        const limit = Math.max(1, Math.min(24, parseInt(String(rawLimit || 8), 10)));
+        // Reutilizar el pool de candidatos en memoria durante 30s para proteger la base de datos Postgres,
+        // pero barajar y componer aleatoriamente la selección en CADA request individual
+        const CANDIDATES_CACHE_KEY = 'products:featured:candidates_pool';
+        let candidates = cache_1.cache.get(CANDIDATES_CACHE_KEY);
+        if (!candidates) {
+            // Traer una muestra amplia de productos activos (últimos 150) con proyección ligera optimizada
+            const sql = `
+        ${SELECT_PRODUCT_SUMMARY_FIELDS}
+        WHERE (p.is_active = true OR p.is_active IS NULL)
+        ORDER BY p.id DESC
+        LIMIT 150
+      `;
+            const result = await database_1.pool.query(sql);
+            candidates = result.rows.map(formatProductRow).filter(Boolean);
+            cache_1.cache.set(CANDIDATES_CACHE_KEY, candidates, 30);
+        }
+        if (!candidates || candidates.length === 0) {
+            return res.json({
+                success: true,
+                data: [],
+                products: [],
+                meta: { total: 0, count: 0, limit }
+            });
+        }
+        // Clasificar en las 3 prioridades comerciales
+        const tier1 = []; // 1ª Prioridad: Destacados explícitos
+        const tier2 = []; // 2ª Prioridad: Nuevos ingresos o más recientes
+        const tier3 = []; // 3ª Prioridad: Con stock disponible
+        // Umbral de IDs recientes (últimos 50 productos ingresados a la tienda)
+        const maxId = Math.max(...candidates.map((c) => Number(c.id) || 0));
+        const recentThresholdId = Math.max(0, maxId - 50);
+        for (const prod of candidates) {
+            const badgeUpper = String(prod.badge || '').toUpperCase();
+            const isExplicitFeatured = prod.is_featured === true ||
+                badgeUpper.includes('DESTACAD') ||
+                badgeUpper.includes('TOP') ||
+                badgeUpper.includes('OFERTA') ||
+                badgeUpper.includes('RECOMENDAD');
+            const isNewArrival = badgeUpper.includes('NUEVO') ||
+                badgeUpper.includes('INGRESO') ||
+                Number(prod.id) >= recentThresholdId;
+            const hasStock = checkProductHasStock(prod);
+            if (isExplicitFeatured) {
+                tier1.push(prod);
+            }
+            else if (isNewArrival) {
+                tier2.push(prod);
+            }
+            else if (hasStock) {
+                tier3.push(prod);
+            }
+        }
+        // Dentro de cada nivel, dar preferencia a aquellos que cuentan con stock disponible
+        const tier1InStock = tier1.filter(checkProductHasStock);
+        const tier1OutStock = tier1.filter(p => !checkProductHasStock(p));
+        const tier2InStock = tier2.filter(checkProductHasStock);
+        const tier2OutStock = tier2.filter(p => !checkProductHasStock(p));
+        const tier3InStock = tier3; // Ya filtrados con stock
+        // Barajar aleatoriamente cada grupo con Fisher-Yates
+        const shuffledTier1 = [...shuffleArray(tier1InStock), ...shuffleArray(tier1OutStock)];
+        const shuffledTier2 = [...shuffleArray(tier2InStock), ...shuffleArray(tier2OutStock)];
+        const shuffledTier3 = shuffleArray(tier3InStock);
+        const selectedProducts = [];
+        const selectedIds = new Set();
+        const addProduct = (p) => {
+            if (!p || selectedIds.has(p.id) || selectedProducts.length >= limit)
+                return false;
+            selectedIds.add(p.id);
+            selectedProducts.push(p);
+            return true;
+        };
+        // 1ª Prioridad: Asignar hasta el 60% de los espacios a Destacados (mínimo 3 si existen),
+        // asegurando cupo para novedades para reflejar la sección "Últimos Ingresos y Destacados"
+        const desiredTier1Slots = Math.min(shuffledTier1.length, Math.max(3, limit - Math.min(shuffledTier2.length, 3)));
+        for (let i = 0; i < desiredTier1Slots; i++) {
+            addProduct(shuffledTier1[i]);
+        }
+        // 2ª Prioridad: Completar con Nuevos Ingresos y más recientes
+        for (const prod of shuffledTier2) {
+            if (selectedProducts.length >= limit)
+                break;
+            addProduct(prod);
+        }
+        // Si aún quedan vacantes, completar con más destacados si había disponibles
+        for (const prod of shuffledTier1) {
+            if (selectedProducts.length >= limit)
+                break;
+            addProduct(prod);
+        }
+        // 3ª Prioridad: Productos con stock disponible
+        for (const prod of shuffledTier3) {
+            if (selectedProducts.length >= limit)
+                break;
+            addProduct(prod);
+        }
+        // Fallback de seguridad: cualquier producto restante si aún no alcanzamos el límite
+        if (selectedProducts.length < limit) {
+            for (const prod of shuffleArray(candidates)) {
+                if (selectedProducts.length >= limit)
+                    break;
+                addProduct(prod);
+            }
+        }
+        // Barajar armónicamente la grilla final para que destacados y novedades
+        // aparezcan intercalados de forma atractiva y dinámica en la Home
+        const randomizedGrid = shuffleArray(selectedProducts);
+        return res.json({
+            success: true,
+            data: randomizedGrid,
+            products: randomizedGrid,
+            meta: {
+                total: randomizedGrid.length,
+                count: randomizedGrid.length,
+                limit,
+                fresh: true
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error en getFeaturedProducts:', error);
+        return res.status(500).json({ error: 'Error al obtener productos destacados dinámicos.' });
+    }
+};
+exports.getFeaturedProducts = getFeaturedProducts;
 /**
  * Obtener producto por ID o slug con soporte dual numérico y textual
  */

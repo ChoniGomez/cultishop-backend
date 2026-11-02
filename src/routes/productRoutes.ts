@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { 
   getProducts, 
   getProductById, 
+  getFeaturedProducts,
   createProduct, 
   updateProduct, 
   deleteProduct 
@@ -25,7 +26,8 @@ const parseProductMultipart = (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-// Rutas públicas para catálogo
+// Rutas públicas para catálogo y home (featured ANTES de :id para evitar colisiones de rutas)
+router.get('/featured', getFeaturedProducts);
 router.get('/', getProducts);
 router.get('/:id', getProductById);
 

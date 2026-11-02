@@ -63,6 +63,7 @@ async function initDb() {
         await database_1.pool.query(`
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge VARCHAR(50);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20) DEFAULT 'gold';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS options JSONB;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory_id INT REFERENCES categories(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(255);
