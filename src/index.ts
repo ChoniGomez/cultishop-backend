@@ -35,7 +35,8 @@ const staticOptions = {
   fallthrough: true // Permite continuar al siguiente middleware si el archivo no existe en este directorio
 };
 
-app.use('/uploads', express.static(UPLOADS_DIR, staticOptions));
+const uploadsPath = process.env.UPLOADS_DIR || path.join(__dirname, '../uploads');
+app.use('/uploads', express.static(uploadsPath, staticOptions));
 
 // Directorios físicos candidatos para servir archivos estáticos (soporte local y VPS Linux)
 const uploadDirectories = [
