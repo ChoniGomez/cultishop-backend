@@ -22,6 +22,7 @@ const parseProductMultipart = (req, res, next) => {
 // Rutas públicas para catálogo y home (featured y offers ANTES de :id para evitar colisiones de rutas)
 router.get('/featured', productController_1.getFeaturedProducts);
 router.get('/offers', productController_1.getOffersProducts);
+router.patch('/:id/offer', authMiddleware_1.requireAuth, authMiddleware_1.requireAdmin, productController_1.setProductOfferStatus);
 router.get('/', productController_1.getProducts);
 router.get('/:id', productController_1.getProductById);
 // Rutas protegidas solo para administradores (soportan JSON y multipart/form-data con múltiples imágenes)

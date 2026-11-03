@@ -4,6 +4,7 @@ import {
   getProductById, 
   getFeaturedProducts,
   getOffersProducts,
+  setProductOfferStatus,
   createProduct, 
   updateProduct, 
   deleteProduct 
@@ -30,6 +31,7 @@ const parseProductMultipart = (req: Request, res: Response, next: NextFunction) 
 // Rutas públicas para catálogo y home (featured y offers ANTES de :id para evitar colisiones de rutas)
 router.get('/featured', getFeaturedProducts);
 router.get('/offers', getOffersProducts);
+router.patch('/:id/offer', requireAuth, requireAdmin, setProductOfferStatus);
 router.get('/', getProducts);
 router.get('/:id', getProductById);
 

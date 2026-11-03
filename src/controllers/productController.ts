@@ -166,9 +166,6 @@ const formatProductRow = (row: any) => {
     ? row.discount_price 
     : (row.discount_price ? parseFloat(row.discount_price) : 0);
   
-  const badgeText = String(row.badge || '').trim();
-  const badgeUpper = badgeText.toUpperCase();
-
   let isOnOffer = false;
   let originalPrice = minPrice;
   let finalPrice = minPrice;
@@ -189,26 +186,6 @@ const formatProductRow = (row: any) => {
     originalPrice = rawDiscountPrice;
     finalPrice = minPrice;
     discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
-    savingsAmount = Math.max(0, originalPrice - finalPrice);
-  } else if (badgeUpper && /([0-9]{1,2})\s*%\s*OFF/.test(badgeUpper)) {
-    // 2. Badge con porcentaje explícito (ej: "-15% OFF", "20% OFF")
-    const match = badgeUpper.match(/([0-9]{1,2})\s*%\s*OFF/);
-    if (match && match[1]) {
-      const pct = parseInt(match[1], 10);
-      if (pct > 0 && pct < 100) {
-        isOnOffer = true;
-        originalPrice = minPrice;
-        discountPercentage = pct;
-        finalPrice = Math.max(1, Math.round(minPrice * (1 - pct / 100)));
-        savingsAmount = Math.max(0, originalPrice - finalPrice);
-      }
-    }
-  } else if (badgeUpper && /OFERTA|PROMO|DESCUENTO|LIQUIDA/i.test(badgeUpper)) {
-    // 3. Badge con etiqueta de oferta o promoción general -> Asignar 15% OFF
-    isOnOffer = true;
-    originalPrice = minPrice;
-    discountPercentage = 15;
-    finalPrice = Math.max(1, Math.round(minPrice * 0.85));
     savingsAmount = Math.max(0, originalPrice - finalPrice);
   }
 
@@ -233,6 +210,7 @@ const formatProductRow = (row: any) => {
     discount_percentage: discountPercentage,
     savings_amount: savingsAmount,
     is_on_offer: isOnOffer,
+    is_offer_active: row.is_offer_active === true,
     offer_condition: offerCondition,
     stock: totalStock,
     total_stock: totalStock,
@@ -287,6 +265,7 @@ const SELECT_PRODUCT_SUMMARY_FIELDS = `
     p.badge_type,
     p.options,
     p.is_active,
+    p.is_offer_active,
     p.category_id,
     p.subcategory_id,
     p.brand,
@@ -326,6 +305,7 @@ const SELECT_PRODUCT_FIELDS = `
     p.badge_type,
     p.options,
     p.is_active,
+    p.is_offer_active,
     p.category_id,
     p.subcategory_id,
     p.brand,
@@ -752,53 +732,18 @@ export const getOffersProducts = async (req: Request, res: Response) => {
       return res.json(cached);
     }
 
-    // Traer productos activos ordenados con preferencia a los que tienen descuento o badge de oferta
+    // Solo exponer productos existentes que el administrador haya activado como oferta.
     const sql = `
       ${SELECT_PRODUCT_SUMMARY_FIELDS}
       WHERE (p.is_active = true OR p.is_active IS NULL)
-      ORDER BY 
-        CASE 
-          WHEN p.discount_price > 0 THEN 0
-          WHEN p.badge ILIKE '%OFF%' OR p.badge ILIKE '%OFERTA%' OR p.badge ILIKE '%PROMO%' THEN 1
-          ELSE 2
-        END,
-        p.id DESC
+        AND p.is_offer_active = true
+      ORDER BY p.id DESC
       LIMIT 200
     `;
     const result = await pool.query(sql);
     const allProducts: any[] = result.rows.map(formatProductRow).filter((p): p is NonNullable<typeof p> => Boolean(p));
 
-    // Filtrar los que están marcados en oferta por formatProductRow
-    let offerProducts: any[] = allProducts.filter((p: any) => p && p.is_on_offer === true);
-
-    // Si hay pocas ofertas explícitas en base de datos (< 12), enriquecer con productos destacados o con stock
-    // y asignar una promoción comercial automática de al menos 10% OFF para que la sección siempre se vea atractiva
-    if (offerProducts.length < 12) {
-      const existingIds = new Set(offerProducts.map((p: any) => p.id));
-      for (const prod of allProducts) {
-        if (prod && !existingIds.has(prod.id) && checkProductHasStock(prod)) {
-          const orig = prod.min_price || prod.price;
-          if (orig > 0) {
-            const pct = 10;
-            const finalP = Math.max(1, Math.round(orig * 0.90));
-            const enriched: any = {
-              ...prod,
-              is_on_offer: true,
-              original_price: orig,
-              final_price: finalP,
-              price: finalP,
-              discount_price: finalP,
-              discount_percentage: pct,
-              savings_amount: orig - finalP,
-              offer_condition: prod.stock > 0 && prod.stock <= 5 ? `¡Últimas ${prod.stock} unidades!` : 'Promoción por tiempo limitado'
-            };
-            offerProducts.push(enriched);
-            existingIds.add(prod.id);
-            if (offerProducts.length >= 24) break;
-          }
-        }
-      }
-    }
+    let offerProducts: any[] = allProducts;
 
     // Filtrado por categoría opcional
     if (category_id && !isNaN(Number(category_id))) {
@@ -858,6 +803,38 @@ export const getOffersProducts = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error en getOffersProducts:', error);
     return res.status(500).json({ error: 'Error al obtener productos en oferta.' });
+  }
+};
+
+export const setProductOfferStatus = async (req: Request, res: Response) => {
+  try {
+    const productId = Number(req.params.id);
+    const isOfferActive = req.body?.is_offer_active;
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: 'Identificador de producto no válido.' });
+    }
+    if (typeof isOfferActive !== 'boolean') {
+      return res.status(400).json({ error: 'is_offer_active debe ser un valor booleano.' });
+    }
+
+    const result = await pool.query(
+      `UPDATE products
+       SET is_offer_active = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, is_offer_active`,
+      [isOfferActive, productId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado.' });
+    }
+
+    cache.invalidate('products');
+    return res.json({ success: true, product: result.rows[0] });
+  } catch (error: any) {
+    console.error('Error al actualizar estado de oferta del producto:', error);
+    return res.status(500).json({ error: 'Error al actualizar el estado de oferta.' });
   }
 };
 

@@ -64,6 +64,7 @@ async function initDb() {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge VARCHAR(50);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20) DEFAULT 'gold';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS is_offer_active BOOLEAN DEFAULT FALSE;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS options JSONB;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory_id INT REFERENCES categories(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(255);
@@ -83,6 +84,7 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_products_subcategory_id ON products(subcategory_id);
       CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
       CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
+      CREATE INDEX IF NOT EXISTS idx_products_is_offer_active ON products(is_offer_active);
       CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, is_active);
       CREATE INDEX IF NOT EXISTS idx_products_sub_active ON products(subcategory_id, is_active);
       CREATE INDEX IF NOT EXISTS idx_products_slug ON products(slug);
