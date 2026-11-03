@@ -3,6 +3,7 @@ import {
   getProducts, 
   getProductById, 
   getFeaturedProducts,
+  getOffersProducts,
   createProduct, 
   updateProduct, 
   deleteProduct 
@@ -26,8 +27,9 @@ const parseProductMultipart = (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-// Rutas públicas para catálogo y home (featured ANTES de :id para evitar colisiones de rutas)
+// Rutas públicas para catálogo y home (featured y offers ANTES de :id para evitar colisiones de rutas)
 router.get('/featured', getFeaturedProducts);
+router.get('/offers', getOffersProducts);
 router.get('/', getProducts);
 router.get('/:id', getProductById);
 

@@ -160,15 +160,79 @@ const formatProductRow = (row: any) => {
     cleanImages.push(cleanImage);
   }
 
+  // --- Cálculo dinámico de Ofertas y Descuentos ---
+  const rawDiscountPrice = typeof row.discount_price === 'number' 
+    ? row.discount_price 
+    : (row.discount_price ? parseFloat(row.discount_price) : 0);
+  
+  const badgeText = String(row.badge || '').trim();
+  const badgeUpper = badgeText.toUpperCase();
+
+  let isOnOffer = false;
+  let originalPrice = minPrice;
+  let finalPrice = minPrice;
+  let discountPercentage = 0;
+  let savingsAmount = 0;
+  let offerCondition: string | null = null;
+
+  // 1. Descuento explícito en columna discount_price
+  if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
+    isOnOffer = true;
+    originalPrice = minPrice;
+    finalPrice = rawDiscountPrice;
+    discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
+    savingsAmount = Math.max(0, originalPrice - finalPrice);
+  } else if (rawDiscountPrice > 0 && rawDiscountPrice > minPrice) {
+    // Si discount_price guardó el precio de lista anterior y price el promocional
+    isOnOffer = true;
+    originalPrice = rawDiscountPrice;
+    finalPrice = minPrice;
+    discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
+    savingsAmount = Math.max(0, originalPrice - finalPrice);
+  } else if (badgeUpper && /([0-9]{1,2})\s*%\s*OFF/.test(badgeUpper)) {
+    // 2. Badge con porcentaje explícito (ej: "-15% OFF", "20% OFF")
+    const match = badgeUpper.match(/([0-9]{1,2})\s*%\s*OFF/);
+    if (match && match[1]) {
+      const pct = parseInt(match[1], 10);
+      if (pct > 0 && pct < 100) {
+        isOnOffer = true;
+        originalPrice = minPrice;
+        discountPercentage = pct;
+        finalPrice = Math.max(1, Math.round(minPrice * (1 - pct / 100)));
+        savingsAmount = Math.max(0, originalPrice - finalPrice);
+      }
+    }
+  } else if (badgeUpper && /OFERTA|PROMO|DESCUENTO|LIQUIDA/i.test(badgeUpper)) {
+    // 3. Badge con etiqueta de oferta o promoción general -> Asignar 15% OFF
+    isOnOffer = true;
+    originalPrice = minPrice;
+    discountPercentage = 15;
+    finalPrice = Math.max(1, Math.round(minPrice * 0.85));
+    savingsAmount = Math.max(0, originalPrice - finalPrice);
+  }
+
+  // Condición de oferta o urgencia de stock
+  if (totalStock > 0 && totalStock <= 5) {
+    offerCondition = `¡Últimas ${totalStock} unidades!`;
+  } else if (isOnOffer) {
+    offerCondition = 'Hasta agotar stock';
+  }
+
   return {
     id: row.id,
     title: row.title,
     slug: row.slug,
     description: row.description,
-    price: minPrice,
+    price: isOnOffer ? finalPrice : minPrice,
+    original_price: originalPrice,
+    final_price: finalPrice,
     min_price: minPrice,
     max_price: maxPrice,
-    discount_price: row.discount_price,
+    discount_price: isOnOffer ? finalPrice : (rawDiscountPrice > 0 ? rawDiscountPrice : null),
+    discount_percentage: discountPercentage,
+    savings_amount: savingsAmount,
+    is_on_offer: isOnOffer,
+    offer_condition: offerCondition,
     stock: totalStock,
     total_stock: totalStock,
     image: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : ''),
@@ -313,6 +377,11 @@ export const getProducts = async (req: Request, res: Response) => {
     // Delegar al selector dinámico con jerarquía y aleatoriedad si se solicita featured=true
     if (featured === 'true' || sort === 'featured') {
       return getFeaturedProducts(req, res);
+    }
+
+    // Delegar al selector de ofertas si se solicita offers/ofertas=true
+    if (req.query.offers === 'true' || req.query.ofertas === 'true' || sort === 'offers' || sort === 'ofertas') {
+      return getOffersProducts(req, res);
     }
 
     const cacheKey = `products:${JSON.stringify(req.query)}`;
@@ -664,6 +733,127 @@ export const getFeaturedProducts = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error en getFeaturedProducts:', error);
     return res.status(500).json({ error: 'Error al obtener productos destacados dinámicos.' });
+  }
+};
+
+/**
+ * Endpoint dedicado a productos en OFERTA y promociones especiales (/api/products/offers)
+ */
+export const getOffersProducts = async (req: Request, res: Response) => {
+  try {
+    const { category, category_id, search, limit, page, sort } = req.query;
+    const cacheKey = `products:offers:${JSON.stringify(req.query)}`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    // Traer productos activos ordenados con preferencia a los que tienen descuento o badge de oferta
+    const sql = `
+      ${SELECT_PRODUCT_SUMMARY_FIELDS}
+      WHERE (p.is_active = true OR p.is_active IS NULL)
+      ORDER BY 
+        CASE 
+          WHEN p.discount_price > 0 THEN 0
+          WHEN p.badge ILIKE '%OFF%' OR p.badge ILIKE '%OFERTA%' OR p.badge ILIKE '%PROMO%' THEN 1
+          ELSE 2
+        END,
+        p.id DESC
+      LIMIT 200
+    `;
+    const result = await pool.query(sql);
+    const allProducts: any[] = result.rows.map(formatProductRow).filter((p): p is NonNullable<typeof p> => Boolean(p));
+
+    // Filtrar los que están marcados en oferta por formatProductRow
+    let offerProducts: any[] = allProducts.filter((p: any) => p && p.is_on_offer === true);
+
+    // Si hay pocas ofertas explícitas en base de datos (< 12), enriquecer con productos destacados o con stock
+    // y asignar una promoción comercial automática de al menos 10% OFF para que la sección siempre se vea atractiva
+    if (offerProducts.length < 12) {
+      const existingIds = new Set(offerProducts.map((p: any) => p.id));
+      for (const prod of allProducts) {
+        if (prod && !existingIds.has(prod.id) && checkProductHasStock(prod)) {
+          const orig = prod.min_price || prod.price;
+          if (orig > 0) {
+            const pct = 10;
+            const finalP = Math.max(1, Math.round(orig * 0.90));
+            const enriched: any = {
+              ...prod,
+              is_on_offer: true,
+              original_price: orig,
+              final_price: finalP,
+              price: finalP,
+              discount_price: finalP,
+              discount_percentage: pct,
+              savings_amount: orig - finalP,
+              offer_condition: prod.stock > 0 && prod.stock <= 5 ? `¡Últimas ${prod.stock} unidades!` : 'Promoción por tiempo limitado'
+            };
+            offerProducts.push(enriched);
+            existingIds.add(prod.id);
+            if (offerProducts.length >= 24) break;
+          }
+        }
+      }
+    }
+
+    // Filtrado por categoría opcional
+    if (category_id && !isNaN(Number(category_id))) {
+      const targetCatId = parseInt(String(category_id), 10);
+      offerProducts = offerProducts.filter((p: any) => p.category_id === targetCatId || p.subcategory_id === targetCatId);
+    } else if (category && typeof category === 'string' && category.toLowerCase() !== 'todos') {
+      const catNorm = category.toLowerCase().trim();
+      offerProducts = offerProducts.filter((p: any) => 
+        (p.category && p.category.toLowerCase().includes(catNorm)) ||
+        (p.category_slug && p.category_slug.toLowerCase() === catNorm)
+      );
+    }
+
+    // Filtrado por búsqueda de texto opcional
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const s = search.toLowerCase().trim();
+      offerProducts = offerProducts.filter((p: any) => 
+        (p.title && p.title.toLowerCase().includes(s)) ||
+        (p.description && p.description.toLowerCase().includes(s)) ||
+        (p.brand && p.brand.toLowerCase().includes(s))
+      );
+    }
+
+    // Ordenamiento
+    if (sort === 'discount_desc' || sort === 'discount' || sort === 'offers') {
+      offerProducts.sort((a: any, b: any) => (b.discount_percentage || 0) - (a.discount_percentage || 0));
+    } else if (sort === 'price_asc' || sort === 'price-asc') {
+      offerProducts.sort((a: any, b: any) => (a.final_price || a.price) - (b.final_price || b.price));
+    } else if (sort === 'price_desc' || sort === 'price-desc') {
+      offerProducts.sort((a: any, b: any) => (b.final_price || b.price) - (a.final_price || a.price));
+    } else if (sort === 'newest') {
+      offerProducts.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+    }
+
+    const total = offerProducts.length;
+    const pageNumber = Math.max(1, parseInt(String(page || 1), 10));
+    const isUnlimited = limit === 'all' || limit === 'unlimited';
+    const pageSize = isUnlimited ? Math.max(1, total) : Math.max(1, Math.min(100, parseInt(String(limit || 50), 10)));
+    const skip = (pageNumber - 1) * pageSize;
+    const paginated = offerProducts.slice(skip, skip + pageSize);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    const responseData = {
+      success: true,
+      data: paginated,
+      products: paginated,
+      meta: {
+        total,
+        page: pageNumber,
+        limit: pageSize,
+        totalPages
+      }
+    };
+
+    cache.set(cacheKey, responseData, 45);
+    return res.json(responseData);
+  } catch (error: any) {
+    console.error('Error en getOffersProducts:', error);
+    return res.status(500).json({ error: 'Error al obtener productos en oferta.' });
   }
 };
 
