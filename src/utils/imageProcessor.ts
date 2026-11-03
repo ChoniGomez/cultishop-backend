@@ -29,6 +29,14 @@ export const resolveUploadsDir = (): string => {
     return cwdBackendUploads;
   }
 
+  // 3b. Comprobar rutas estándar de producción en VPS Linux
+  if (fs.existsSync('/var/www/cultishop/backend/uploads')) {
+    return '/var/www/cultishop/backend/uploads';
+  }
+  if (fs.existsSync('/var/www/cultishop/uploads')) {
+    return '/var/www/cultishop/uploads';
+  }
+
   // 4. Ubicación relativa al archivo compilado/fuente (dist/utils/../../uploads o src/utils/../../uploads)
   const relativeUploads = path.resolve(__dirname, '../../uploads');
   if (fs.existsSync(relativeUploads)) {
