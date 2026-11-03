@@ -62,7 +62,7 @@ const sanitizeAndMigrateImage = (imageUrl: string | null | undefined, productId:
   const targetWebp = `/uploads/${targetFilename}`;
   const targetFilePath = path.join(UPLOADS_DIR, targetFilename);
 
-  // Si el archivo físico ya existe en el disco, devolver la URL WebP de inmediato sin procesar
+  // Si el archivo físico ya existe en el disco, devolver la URL WebP de inmediato
   if (fs.existsSync(targetFilePath)) {
     return targetWebp;
   }
@@ -78,7 +78,8 @@ const sanitizeAndMigrateImage = (imageUrl: string | null | undefined, productId:
       console.warn(`[ImageMigration] No se pudo guardar imagen WebP de producto ${productId}:`, err?.message || err);
     });
 
-  return targetWebp;
+  // Retornar la cadena Base64 mientras se completa la persistencia para que el cliente no quede en blanco
+  return trimmed;
 };
 
 // Helper común para formatear la fila del producto
@@ -235,9 +236,12 @@ const formatProductRow = (row: any) => {
     offer_condition: offerCondition,
     stock: totalStock,
     total_stock: totalStock,
-    image: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : ''),
-    image_url: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : ''),
-    images: cleanImages,
+    image: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
+    image_url: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
+    imageUrl: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
+    imagen: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
+    images: cleanImages.length > 0 ? cleanImages : (cleanImage ? [cleanImage] : []),
+    imagenes: cleanImages.length > 0 ? cleanImages : (cleanImage ? [cleanImage] : []),
     badge: row.badge,
     badge_type: row.badge_type,
     is_active: row.is_active,
@@ -1061,7 +1065,7 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 
     if (rawImagesList.length === 0) {
-      rawImagesList.push('https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600');
+      rawImagesList.push('https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=600');
     }
 
     const uniqueRawImages = Array.from(new Set(rawImagesList.map(img => String(img).trim()).filter(Boolean)));

@@ -57,23 +57,39 @@ uploadDirectories.forEach((dir) => {
   } catch {}
 });
 
-// Imagen de respaldo global oficial de cultivo
-const GLOBAL_FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600';
-
-const DEFAULT_CANNABIS_IMAGES: { [key: number]: string } = {
-  1: 'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=600',
-  2: 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=600',
-  3: 'https://images.unsplash.com/photo-1603909223429-69bb7101f420?auto=format&fit=crop&q=80&w=600',
-  4: 'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=600',
-  5: 'https://images.unsplash.com/photo-1602928321679-560bb453f190?auto=format&fit=crop&q=80&w=600',
-  6: 'https://images.unsplash.com/photo-1536257104079-aa99c6460a5a?auto=format&fit=crop&q=80&w=600',
-  7: 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&q=80&w=600',
-  8: 'https://images.unsplash.com/photo-1568644396922-5c3bfae12521?auto=format&fit=crop&q=80&w=600',
-  9: 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&q=80&w=600',
-  10: 'https://images.unsplash.com/photo-1584017911766-d451b3d0e843?auto=format&fit=crop&q=80&w=600',
-  11: 'https://images.unsplash.com/photo-1527842891421-42eec6e703ea?auto=format&fit=crop&q=80&w=600',
-  12: 'https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&q=80&w=600'
+// Mapeo temático de imágenes por categoría para insumos de cultivo
+const CATEGORY_DEFAULT_IMAGES: { [key: string]: string } = {
+  'fertilizantes': 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=600',
+  'control-de-plagas': 'https://images.unsplash.com/photo-1536257104079-aa99c6460a5a?auto=format&fit=crop&q=80&w=600',
+  'indoor': 'https://images.unsplash.com/photo-1584017911766-d451b3d0e843?auto=format&fit=crop&q=80&w=600',
+  'iluminacion': 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=600',
+  'medicion': 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=600',
+  'kits': 'https://images.unsplash.com/photo-1602928321679-560bb453f190?auto=format&fit=crop&q=80&w=600',
+  'parafernalia': 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&q=80&w=600',
+  'sustratos-macetas': 'https://images.unsplash.com/photo-1592417817098-8f3d691a4bf5?auto=format&fit=crop&q=80&w=600',
+  'semillas': 'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=600',
+  'riego': 'https://images.unsplash.com/photo-1527842891421-42eec6e703ea?auto=format&fit=crop&q=80&w=600',
+  'default': 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=600'
 };
+
+// Mapeo individual por ID de producto hacia su fotografía de insumo oficial
+const PRODUCT_SPECIFIC_IMAGES: { [key: number]: string } = {
+  1: 'https://images.unsplash.com/photo-1624990833801-56c1b6a56ba7?auto=format&fit=crop&q=80&w=600', // Oro Negro
+  2: 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&q=80&w=600', // Amazonia
+  3: 'https://images.unsplash.com/photo-1628543606553-66239922f533?auto=format&fit=crop&q=80&w=600', // Flora Booster
+  4: 'https://images.unsplash.com/photo-1536939459926-301728717817?auto=format&fit=crop&q=80&w=600', // Trico+
+  5: 'https://images.unsplash.com/photo-1602928321679-560bb453f190?auto=format&fit=crop&q=80&w=600', // Kit Mamboreta
+  6: 'https://images.unsplash.com/photo-1536257104079-aa99c6460a5a?auto=format&fit=crop&q=80&w=600', // Confi
+  7: 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&q=80&w=600', // Aba
+  8: 'https://images.unsplash.com/photo-1568644396922-5c3bfae12521?auto=format&fit=crop&q=80&w=600', // Oil
+  9: 'https://images.unsplash.com/photo-1607613009820-a29f7bb81c04?auto=format&fit=crop&q=80&w=600', // GT5
+  10: 'https://images.unsplash.com/photo-1584017911766-d451b3d0e843?auto=format&fit=crop&q=80&w=600', // GT25
+  11: 'https://images.unsplash.com/photo-1527842891421-42eec6e703ea?auto=format&fit=crop&q=80&w=600', // Pulverizador
+  12: 'https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&q=80&w=600', // Regadera
+  13: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=600'  // Medidor
+};
+
+const GLOBAL_FALLBACK_IMAGE = CATEGORY_DEFAULT_IMAGES.default;
 
 // Píxel WebP transparente 1x1 (26 bytes) para contingencia garantizando que NUNCA se retorne text/html
 const TRANSPARENT_WEBP_1X1 = Buffer.from(
@@ -105,13 +121,22 @@ const handleUploadImageRequest = async (req: express.Request, res: express.Respo
   if (match) {
     const productId = parseInt(match[1], 10);
     try {
-      const dbRes = await pool.query('SELECT image_url, images FROM products WHERE id = $1', [productId]);
+      const dbRes = await pool.query(
+        `SELECT p.image_url, p.images, c.slug as category_slug, sub.slug as subcategory_slug 
+         FROM products p 
+         LEFT JOIN categories c ON p.category_id = c.id 
+         LEFT JOIN categories sub ON p.subcategory_id = sub.id 
+         WHERE p.id = $1`,
+        [productId]
+      );
+
       if (dbRes.rows.length > 0) {
-        let rawImage = dbRes.rows[0].image_url ? String(dbRes.rows[0].image_url).trim() : '';
+        const row = dbRes.rows[0];
+        let rawImage = row.image_url ? String(row.image_url).trim() : '';
 
         // Si image_url está vacío pero tiene array de images
-        if (!rawImage && Array.isArray(dbRes.rows[0].images) && dbRes.rows[0].images.length > 0) {
-          rawImage = String(dbRes.rows[0].images[0]).trim();
+        if (!rawImage && Array.isArray(row.images) && row.images.length > 0) {
+          rawImage = String(row.images[0]).trim();
         }
 
         // Si la base de datos contiene Base64 original, convertir al vuelo inmediatamente
@@ -139,13 +164,27 @@ const handleUploadImageRequest = async (req: express.Request, res: express.Respo
         } else if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
           return res.redirect(302, rawImage);
         }
+
+        // Si no tiene imagen específica cargada en BD, verificar si corresponde a un producto oficial
+        if (PRODUCT_SPECIFIC_IMAGES[productId]) {
+          return res.redirect(302, PRODUCT_SPECIFIC_IMAGES[productId]);
+        }
+
+        // O asignar fallback temático por categoría (ej: fertilizante, medidor, indoor, sustrato)
+        const catKey = String(row.subcategory_slug || row.category_slug || '').toLowerCase().trim();
+        for (const [key, fallbackUrl] of Object.entries(CATEGORY_DEFAULT_IMAGES)) {
+          if (key !== 'default' && catKey.includes(key)) {
+            return res.redirect(302, fallbackUrl);
+          }
+        }
       }
 
-      // Fallback temático para productos sin archivo físico o con URL no resuelta
-      const defaultImg = DEFAULT_CANNABIS_IMAGES[productId] ||
-        DEFAULT_CANNABIS_IMAGES[((productId - 1) % 12) + 1] ||
-        GLOBAL_FALLBACK_IMAGE;
-      return res.redirect(302, defaultImg);
+      // Si el producto no existe o no tiene categoría asignada
+      if (PRODUCT_SPECIFIC_IMAGES[productId]) {
+        return res.redirect(302, PRODUCT_SPECIFIC_IMAGES[productId]);
+      }
+
+      return res.redirect(302, GLOBAL_FALLBACK_IMAGE);
     } catch (err: any) {
       console.warn(`[StaticFallback] Error procesando imagen al vuelo para producto ${match[1]}:`, err?.message || err);
     }
