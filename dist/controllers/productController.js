@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProductById = exports.setProductOfferStatus = exports.getOffersProducts = exports.getFeaturedProducts = exports.getProducts = void 0;
+exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProductById = exports.setProductOfferStatus = exports.getOfferManagementProducts = exports.getOffersProducts = exports.getFeaturedProducts = exports.getProducts = void 0;
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const database_1 = require("../config/database");
@@ -745,6 +745,23 @@ const getOffersProducts = async (req, res) => {
     }
 };
 exports.getOffersProducts = getOffersProducts;
+const getOfferManagementProducts = async (_req, res) => {
+    try {
+        const result = await database_1.pool.query(`
+      ${SELECT_PRODUCT_SUMMARY_FIELDS}
+      ORDER BY p.title ASC, p.id ASC
+    `);
+        const products = result.rows
+            .map(formatProductRow)
+            .filter((product) => Boolean(product));
+        return res.status(200).json({ success: true, data: products, products });
+    }
+    catch (error) {
+        console.error('Error al listar productos para gestión de ofertas:', error);
+        return res.status(500).json({ error: 'Error al cargar productos para gestión de ofertas.' });
+    }
+};
+exports.getOfferManagementProducts = getOfferManagementProducts;
 const setProductOfferStatus = async (req, res) => {
     try {
         const productId = Number(req.params.id);

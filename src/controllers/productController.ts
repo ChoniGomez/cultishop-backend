@@ -806,6 +806,23 @@ export const getOffersProducts = async (req: Request, res: Response) => {
   }
 };
 
+export const getOfferManagementProducts = async (_req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+      ${SELECT_PRODUCT_SUMMARY_FIELDS}
+      ORDER BY p.title ASC, p.id ASC
+    `);
+    const products = result.rows
+      .map(formatProductRow)
+      .filter((product): product is NonNullable<typeof product> => Boolean(product));
+
+    return res.status(200).json({ success: true, data: products, products });
+  } catch (error: any) {
+    console.error('Error al listar productos para gestión de ofertas:', error);
+    return res.status(500).json({ error: 'Error al cargar productos para gestión de ofertas.' });
+  }
+};
+
 export const setProductOfferStatus = async (req: Request, res: Response) => {
   try {
     const productId = Number(req.params.id);
