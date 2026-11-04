@@ -168,7 +168,28 @@ const formatProductRow = (row: any) => {
   const rawDiscountPct = typeof row.discount_percentage === 'number'
     ? row.discount_percentage
     : (row.discount_percentage ? parseInt(row.discount_percentage, 10) : 0);
-  const isOfferActive = row.is_offer_active === true;
+
+  // --- Vigencia y Fechas en Ofertas ---
+  const now = new Date();
+  const rawStartDate = row.offer_start_date ? new Date(row.offer_start_date) : null;
+  const rawEndDate = row.offer_end_date ? new Date(row.offer_end_date) : null;
+  const untilStockOut = row.offer_until_stock_out !== false;
+
+  let isOfferExpired = false;
+  let isOfferScheduled = false;
+
+  if (rawStartDate && !isNaN(rawStartDate.getTime()) && rawStartDate > now) {
+    isOfferScheduled = true;
+  }
+  if (rawEndDate && !isNaN(rawEndDate.getTime()) && rawEndDate < now) {
+    isOfferExpired = true;
+  }
+  if (untilStockOut && totalStock <= 0) {
+    isOfferExpired = true;
+  }
+
+  // Una oferta solo está verdaderamente activa si el admin la activó y no expiró
+  const isCurrentlyEffective = row.is_offer_active === true && !isOfferExpired && !isOfferScheduled;
   
   let isOnOffer = false;
   let originalPrice = minPrice;
@@ -177,7 +198,7 @@ const formatProductRow = (row: any) => {
   let savingsAmount = 0;
   let offerCondition: string | null = null;
 
-  if (isOfferActive) {
+  if (isCurrentlyEffective) {
     isOnOffer = true;
     originalPrice = minPrice;
     if (rawDiscountPct > 0) {
@@ -192,14 +213,14 @@ const formatProductRow = (row: any) => {
       finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
     }
     savingsAmount = Math.max(0, originalPrice - finalPrice);
-  } else if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
+  } else if (!row.is_offer_active && rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
     // Descuento explícito en columna discount_price
     isOnOffer = true;
     originalPrice = minPrice;
     finalPrice = rawDiscountPrice;
     discountPercentage = rawDiscountPct > 0 ? rawDiscountPct : Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
     savingsAmount = Math.max(0, originalPrice - finalPrice);
-  } else if (rawDiscountPrice > 0 && rawDiscountPrice > minPrice) {
+  } else if (!row.is_offer_active && rawDiscountPrice > 0 && rawDiscountPrice > minPrice) {
     // Si discount_price guardó el precio de lista anterior y price el promocional
     isOnOffer = true;
     originalPrice = rawDiscountPrice;
@@ -208,11 +229,23 @@ const formatProductRow = (row: any) => {
     savingsAmount = Math.max(0, originalPrice - finalPrice);
   }
 
-  // Condición de oferta o urgencia de stock
-  if (totalStock > 0 && totalStock <= 5) {
+  // Condición de oferta legible para el usuario
+  if (row.offer_condition && typeof row.offer_condition === 'string' && row.offer_condition.trim()) {
+    offerCondition = row.offer_condition.trim();
+  } else if (isOfferExpired) {
+    offerCondition = 'Oferta finalizada';
+  } else if (isOfferScheduled && rawStartDate) {
+    const sStr = rawStartDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+    offerCondition = `Inicia el ${sStr}`;
+  } else if (rawEndDate && !isOfferExpired) {
+    const eStr = rawEndDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    offerCondition = `Válido hasta ${eStr}`;
+  } else if (totalStock > 0 && totalStock <= 5) {
     offerCondition = `¡Últimas ${totalStock} unidades!`;
-  } else if (isOnOffer) {
+  } else if (untilStockOut) {
     offerCondition = 'Hasta agotar stock';
+  } else if (isOnOffer) {
+    offerCondition = 'Promoción especial';
   }
 
   return {
@@ -229,7 +262,12 @@ const formatProductRow = (row: any) => {
     discount_percentage: isOnOffer ? discountPercentage : (rawDiscountPct > 0 ? rawDiscountPct : 0),
     savings_amount: isOnOffer ? savingsAmount : 0,
     is_on_offer: isOnOffer,
-    is_offer_active: isOfferActive,
+    is_offer_active: row.is_offer_active === true,
+    is_offer_expired: isOfferExpired,
+    is_offer_scheduled: isOfferScheduled,
+    offer_start_date: rawStartDate && !isNaN(rawStartDate.getTime()) ? rawStartDate.toISOString().split('T')[0] : null,
+    offer_end_date: rawEndDate && !isNaN(rawEndDate.getTime()) ? rawEndDate.toISOString().split('T')[0] : null,
+    offer_until_stock_out: untilStockOut,
     offer_condition: offerCondition,
     stock: totalStock,
     total_stock: totalStock,
@@ -286,6 +324,10 @@ const SELECT_PRODUCT_SUMMARY_FIELDS = `
     p.options,
     p.is_active,
     p.is_offer_active,
+    p.offer_start_date,
+    p.offer_end_date,
+    p.offer_until_stock_out,
+    p.offer_condition,
     p.category_id,
     p.subcategory_id,
     p.brand,
@@ -327,6 +369,10 @@ const SELECT_PRODUCT_FIELDS = `
     p.options,
     p.is_active,
     p.is_offer_active,
+    p.offer_start_date,
+    p.offer_end_date,
+    p.offer_until_stock_out,
+    p.offer_condition,
     p.category_id,
     p.subcategory_id,
     p.brand,
@@ -753,16 +799,21 @@ export const getOffersProducts = async (req: Request, res: Response) => {
       return res.json(cached);
     }
 
-    // Solo exponer productos existentes que el administrador haya activado como oferta.
+    // Solo exponer productos existentes que el administrador haya activado como oferta y cuya vigencia sea válida.
     const sql = `
       ${SELECT_PRODUCT_SUMMARY_FIELDS}
       WHERE (p.is_active = true OR p.is_active IS NULL)
         AND p.is_offer_active = true
+        AND (p.offer_start_date IS NULL OR p.offer_start_date <= NOW())
+        AND (p.offer_end_date IS NULL OR p.offer_end_date >= NOW())
+        AND (p.offer_until_stock_out IS NOT TRUE OR p.stock > 0)
       ORDER BY p.id DESC
       LIMIT 200
     `;
     const result = await pool.query(sql);
-    const allProducts: any[] = result.rows.map(formatProductRow).filter((p): p is NonNullable<typeof p> => Boolean(p));
+    const allProducts: any[] = result.rows
+      .map(formatProductRow)
+      .filter((p): p is NonNullable<typeof p> => Boolean(p && p.is_on_offer && !p.is_offer_expired));
 
     let offerProducts: any[] = allProducts;
 
@@ -871,7 +922,14 @@ export const getOfferManagementProducts = async (req: Request, res: Response) =>
     const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
     // Conteo global de ofertas activas para el badge de cabecera
-    const activeCountRes = await pool.query(`SELECT COUNT(*) as count FROM products WHERE is_offer_active = true`);
+    const activeCountRes = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM products 
+      WHERE is_offer_active = true
+        AND (offer_start_date IS NULL OR offer_start_date <= NOW())
+        AND (offer_end_date IS NULL OR offer_end_date >= NOW())
+        AND (offer_until_stock_out IS NOT TRUE OR stock > 0)
+    `);
     const activeCount = parseInt(activeCountRes.rows[0]?.count || '0', 10);
 
     // Parámetros para paginar en base de datos sin sobrecargar la memoria
@@ -916,7 +974,14 @@ export const getOfferManagementProducts = async (req: Request, res: Response) =>
 export const setProductOfferStatus = async (req: Request, res: Response) => {
   try {
     const productId = Number(req.params.id);
-    const { is_offer_active, discount_percentage } = req.body;
+    const { 
+      is_offer_active, 
+      discount_percentage,
+      offer_start_date,
+      offer_end_date,
+      offer_until_stock_out,
+      offer_condition
+    } = req.body;
 
     if (!Number.isInteger(productId) || productId <= 0) {
       return res.status(400).json({ error: 'Identificador de producto no válido.' });
@@ -927,7 +992,7 @@ export const setProductOfferStatus = async (req: Request, res: Response) => {
 
     // Verificar existencia del producto
     const currentRes = await pool.query(
-      `SELECT id, price, discount_price, discount_percentage FROM products WHERE id = $1`,
+      `SELECT id, price, discount_price, discount_percentage, offer_start_date, offer_end_date, offer_until_stock_out, offer_condition FROM products WHERE id = $1`,
       [productId]
     );
 
@@ -946,15 +1011,39 @@ export const setProductOfferStatus = async (req: Request, res: Response) => {
 
     const targetDiscountPrice = Math.round(basePrice * (1 - targetPct / 100) * 100) / 100;
 
+    // Normalizar vigencia y fechas
+    const startDate = offer_start_date !== undefined 
+      ? (offer_start_date ? new Date(offer_start_date) : null) 
+      : current.offer_start_date;
+    const endDate = offer_end_date !== undefined 
+      ? (offer_end_date ? new Date(offer_end_date) : null) 
+      : current.offer_end_date;
+    const untilStock = offer_until_stock_out !== undefined 
+      ? Boolean(offer_until_stock_out) 
+      : (current.offer_until_stock_out !== false);
+
+    let cond = offer_condition !== undefined ? (offer_condition ? String(offer_condition).trim() : null) : current.offer_condition;
+    if (!cond) {
+      if (untilStock) {
+        cond = 'Hasta agotar stock';
+      } else if (endDate) {
+        cond = `Válido hasta ${new Date(endDate).toLocaleDateString('es-AR')}`;
+      }
+    }
+
     if (is_offer_active) {
       await pool.query(
         `UPDATE products
          SET is_offer_active = true,
              discount_percentage = $1,
              discount_price = $2,
+             offer_start_date = $3,
+             offer_end_date = $4,
+             offer_until_stock_out = $5,
+             offer_condition = $6,
              updated_at = NOW()
-         WHERE id = $3`,
-        [targetPct, targetDiscountPrice, productId]
+         WHERE id = $7`,
+        [targetPct, targetDiscountPrice, startDate, endDate, untilStock, cond, productId]
       );
     } else {
       await pool.query(
@@ -974,8 +1063,15 @@ export const setProductOfferStatus = async (req: Request, res: Response) => {
 
     const formattedProduct = updatedRes.rows.length > 0 ? formatProductRow(updatedRes.rows[0]) : null;
 
-    // Total de ofertas activas actualizadas
-    const activeCountRes = await pool.query(`SELECT COUNT(*) as count FROM products WHERE is_offer_active = true`);
+    // Total de ofertas activas no expiradas
+    const activeCountRes = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM products 
+      WHERE is_offer_active = true
+        AND (offer_start_date IS NULL OR offer_start_date <= NOW())
+        AND (offer_end_date IS NULL OR offer_end_date >= NOW())
+        AND (offer_until_stock_out IS NOT TRUE OR stock > 0)
+    `);
     const activeCount = parseInt(activeCountRes.rows[0]?.count || '0', 10);
 
     cache.invalidate('products');

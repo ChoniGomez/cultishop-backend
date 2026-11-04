@@ -64,6 +64,10 @@ export async function initDb() {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS is_offer_active BOOLEAN DEFAULT FALSE;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_price DECIMAL(12, 2);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_percentage INT DEFAULT 0;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS offer_start_date TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS offer_end_date TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS offer_until_stock_out BOOLEAN DEFAULT TRUE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS offer_condition VARCHAR(255);
       ALTER TABLE products ADD COLUMN IF NOT EXISTS options JSONB;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory_id INT REFERENCES categories(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(255);
