@@ -62,6 +62,8 @@ export async function initDb() {
       ALTER TABLE products ADD COLUMN IF NOT EXISTS badge_type VARCHAR(20) DEFAULT 'gold';
       ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT FALSE;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS is_offer_active BOOLEAN DEFAULT FALSE;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_price DECIMAL(12, 2);
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_percentage INT DEFAULT 0;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS options JSONB;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory_id INT REFERENCES categories(id) ON DELETE SET NULL;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(255);

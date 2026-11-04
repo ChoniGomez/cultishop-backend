@@ -165,27 +165,46 @@ const formatProductRow = (row: any) => {
   const rawDiscountPrice = typeof row.discount_price === 'number' 
     ? row.discount_price 
     : (row.discount_price ? parseFloat(row.discount_price) : 0);
+  const rawDiscountPct = typeof row.discount_percentage === 'number'
+    ? row.discount_percentage
+    : (row.discount_percentage ? parseInt(row.discount_percentage, 10) : 0);
+  const isOfferActive = row.is_offer_active === true;
   
   let isOnOffer = false;
   let originalPrice = minPrice;
   let finalPrice = minPrice;
-  let discountPercentage = 0;
+  let discountPercentage = rawDiscountPct > 0 ? rawDiscountPct : 0;
   let savingsAmount = 0;
   let offerCondition: string | null = null;
 
-  // 1. Descuento explícito en columna discount_price
-  if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
+  if (isOfferActive) {
+    isOnOffer = true;
+    originalPrice = minPrice;
+    if (rawDiscountPct > 0) {
+      discountPercentage = rawDiscountPct;
+      finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
+    } else if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
+      finalPrice = rawDiscountPrice;
+      discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
+    } else {
+      // Valor por defecto si se activó la oferta sin porcentaje explícito
+      discountPercentage = 15;
+      finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
+    }
+    savingsAmount = Math.max(0, originalPrice - finalPrice);
+  } else if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
+    // Descuento explícito en columna discount_price
     isOnOffer = true;
     originalPrice = minPrice;
     finalPrice = rawDiscountPrice;
-    discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
+    discountPercentage = rawDiscountPct > 0 ? rawDiscountPct : Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
     savingsAmount = Math.max(0, originalPrice - finalPrice);
   } else if (rawDiscountPrice > 0 && rawDiscountPrice > minPrice) {
     // Si discount_price guardó el precio de lista anterior y price el promocional
     isOnOffer = true;
     originalPrice = rawDiscountPrice;
     finalPrice = minPrice;
-    discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
+    discountPercentage = rawDiscountPct > 0 ? rawDiscountPct : Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
     savingsAmount = Math.max(0, originalPrice - finalPrice);
   }
 
@@ -207,10 +226,10 @@ const formatProductRow = (row: any) => {
     min_price: minPrice,
     max_price: maxPrice,
     discount_price: isOnOffer ? finalPrice : (rawDiscountPrice > 0 ? rawDiscountPrice : null),
-    discount_percentage: discountPercentage,
-    savings_amount: savingsAmount,
+    discount_percentage: isOnOffer ? discountPercentage : (rawDiscountPct > 0 ? rawDiscountPct : 0),
+    savings_amount: isOnOffer ? savingsAmount : 0,
     is_on_offer: isOnOffer,
-    is_offer_active: row.is_offer_active === true,
+    is_offer_active: isOfferActive,
     offer_condition: offerCondition,
     stock: totalStock,
     total_stock: totalStock,
@@ -258,6 +277,7 @@ const SELECT_PRODUCT_SUMMARY_FIELDS = `
     p.description,
     p.price,
     p.discount_price,
+    p.discount_percentage,
     p.stock,
     p.image_url,
     p.images,
@@ -298,6 +318,7 @@ const SELECT_PRODUCT_FIELDS = `
     p.description,
     p.price,
     p.discount_price,
+    p.discount_percentage,
     p.stock,
     p.image_url,
     p.images,
@@ -806,17 +827,86 @@ export const getOffersProducts = async (req: Request, res: Response) => {
   }
 };
 
-export const getOfferManagementProducts = async (_req: Request, res: Response) => {
+export const getOfferManagementProducts = async (req: Request, res: Response) => {
   try {
-    const result = await pool.query(`
+    const page = Math.max(1, parseInt(String(req.query.page || 1), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || 20), 10)));
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const filter = typeof req.query.filter === 'string' ? req.query.filter.trim().toLowerCase() : 'all';
+
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    // Filtro por estado de oferta
+    if (filter === 'active') {
+      conditions.push(`p.is_offer_active = true`);
+    } else if (filter === 'inactive') {
+      conditions.push(`(p.is_offer_active = false OR p.is_offer_active IS NULL)`);
+    }
+
+    // Filtro de búsqueda rápida
+    if (search) {
+      values.push(`%${search}%`);
+      conditions.push(`(
+        p.title ILIKE $${paramIndex} OR 
+        p.brand ILIKE $${paramIndex} OR 
+        c.name ILIKE $${paramIndex} OR
+        sub.name ILIKE $${paramIndex}
+      )`);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Conteo total para paginación
+    const countSql = `
+      SELECT COUNT(DISTINCT p.id) as total
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN categories sub ON p.subcategory_id = sub.id
+      ${whereClause}
+    `;
+    const countRes = await pool.query(countSql, values);
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
+    // Conteo global de ofertas activas para el badge de cabecera
+    const activeCountRes = await pool.query(`SELECT COUNT(*) as count FROM products WHERE is_offer_active = true`);
+    const activeCount = parseInt(activeCountRes.rows[0]?.count || '0', 10);
+
+    // Parámetros para paginar en base de datos sin sobrecargar la memoria
+    const offset = (page - 1) * limit;
+    values.push(limit);
+    const limitParam = `$${paramIndex++}`;
+    values.push(offset);
+    const offsetParam = `$${paramIndex++}`;
+
+    const dataSql = `
       ${SELECT_PRODUCT_SUMMARY_FIELDS}
-      ORDER BY p.title ASC, p.id ASC
-    `);
+      ${whereClause}
+      ORDER BY p.is_offer_active DESC NULLS LAST, p.title ASC, p.id ASC
+      LIMIT ${limitParam} OFFSET ${offsetParam}
+    `;
+
+    const result = await pool.query(dataSql, values);
     const products = result.rows
       .map(formatProductRow)
       .filter((product): product is NonNullable<typeof product> => Boolean(product));
 
-    return res.status(200).json({ success: true, data: products, products });
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return res.status(200).json({
+      success: true,
+      data: products,
+      products,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        activeCount
+      }
+    });
   } catch (error: any) {
     console.error('Error al listar productos para gestión de ofertas:', error);
     return res.status(500).json({ error: 'Error al cargar productos para gestión de ofertas.' });
@@ -826,29 +916,74 @@ export const getOfferManagementProducts = async (_req: Request, res: Response) =
 export const setProductOfferStatus = async (req: Request, res: Response) => {
   try {
     const productId = Number(req.params.id);
-    const isOfferActive = req.body?.is_offer_active;
+    const { is_offer_active, discount_percentage } = req.body;
 
     if (!Number.isInteger(productId) || productId <= 0) {
       return res.status(400).json({ error: 'Identificador de producto no válido.' });
     }
-    if (typeof isOfferActive !== 'boolean') {
+    if (typeof is_offer_active !== 'boolean') {
       return res.status(400).json({ error: 'is_offer_active debe ser un valor booleano.' });
     }
 
-    const result = await pool.query(
-      `UPDATE products
-       SET is_offer_active = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, is_offer_active`,
-      [isOfferActive, productId]
+    // Verificar existencia del producto
+    const currentRes = await pool.query(
+      `SELECT id, price, discount_price, discount_percentage FROM products WHERE id = $1`,
+      [productId]
     );
 
-    if (result.rows.length === 0) {
+    if (currentRes.rows.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado.' });
     }
 
+    const current = currentRes.rows[0];
+    const basePrice = Number(current.price) || 0;
+
+    let targetPct = current.discount_percentage || 15;
+    if (discount_percentage !== undefined && discount_percentage !== null && !isNaN(Number(discount_percentage))) {
+      targetPct = Math.min(95, Math.max(1, Math.round(Number(discount_percentage))));
+    }
+    if (targetPct <= 0) targetPct = 15;
+
+    const targetDiscountPrice = Math.round(basePrice * (1 - targetPct / 100) * 100) / 100;
+
+    if (is_offer_active) {
+      await pool.query(
+        `UPDATE products
+         SET is_offer_active = true,
+             discount_percentage = $1,
+             discount_price = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [targetPct, targetDiscountPrice, productId]
+      );
+    } else {
+      await pool.query(
+        `UPDATE products
+         SET is_offer_active = false,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [productId]
+      );
+    }
+
+    // Recuperar el registro completo con proyecciones y categorías para el frontend
+    const updatedRes = await pool.query(
+      `${SELECT_PRODUCT_SUMMARY_FIELDS} WHERE p.id = $1`,
+      [productId]
+    );
+
+    const formattedProduct = updatedRes.rows.length > 0 ? formatProductRow(updatedRes.rows[0]) : null;
+
+    // Total de ofertas activas actualizadas
+    const activeCountRes = await pool.query(`SELECT COUNT(*) as count FROM products WHERE is_offer_active = true`);
+    const activeCount = parseInt(activeCountRes.rows[0]?.count || '0', 10);
+
     cache.invalidate('products');
-    return res.json({ success: true, product: result.rows[0] });
+    return res.json({ 
+      success: true, 
+      product: formattedProduct,
+      meta: { activeCount }
+    });
   } catch (error: any) {
     console.error('Error al actualizar estado de oferta del producto:', error);
     return res.status(500).json({ error: 'Error al actualizar el estado de oferta.' });
