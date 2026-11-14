@@ -5,6 +5,9 @@ import { pool } from '../config/database';
 import { cache } from '../utils/cache';
 import { processAnyImageInput, deleteOldImageFile, UPLOADS_DIR } from '../utils/imageProcessor';
 
+const roundPriceToCents = (amount: number): number =>
+  Math.round((amount + Number.EPSILON) * 100) / 100;
+
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text: string) => {
   return text
@@ -203,14 +206,14 @@ const formatProductRow = (row: any) => {
     originalPrice = minPrice;
     if (rawDiscountPct > 0) {
       discountPercentage = rawDiscountPct;
-      finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
+      finalPrice = roundPriceToCents(originalPrice * (1 - discountPercentage / 100));
     } else if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
       finalPrice = rawDiscountPrice;
       discountPercentage = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
     } else {
       // Valor por defecto si se activó la oferta sin porcentaje explícito
       discountPercentage = 15;
-      finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
+      finalPrice = roundPriceToCents(originalPrice * (1 - discountPercentage / 100));
     }
     savingsAmount = Math.max(0, originalPrice - finalPrice);
   } else if (!row.is_offer_active && rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
@@ -253,7 +256,7 @@ const formatProductRow = (row: any) => {
     title: row.title,
     slug: row.slug,
     description: row.description,
-    price: isOnOffer ? finalPrice : minPrice,
+    price: minPrice,
     original_price: originalPrice,
     final_price: finalPrice,
     min_price: minPrice,
@@ -1009,7 +1012,7 @@ export const setProductOfferStatus = async (req: Request, res: Response) => {
     }
     if (targetPct <= 0) targetPct = 15;
 
-    const targetDiscountPrice = Math.round(basePrice * (1 - targetPct / 100) * 100) / 100;
+    const targetDiscountPrice = roundPriceToCents(basePrice * (1 - targetPct / 100));
 
     // Normalizar vigencia y fechas
     const startDate = offer_start_date !== undefined 

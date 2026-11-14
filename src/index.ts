@@ -16,6 +16,7 @@ import instagramRoutes from './routes/instagramRoutes';
 import faqRoutes from './routes/faqRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import adminRoutes from './routes/adminRoutes';
+import chatbotRoutes from './routes/chatbotRoutes';
 import { initDb } from './config/initDb';
 import { UPLOADS_DIR } from './utils/imageProcessor';
 
@@ -219,6 +220,7 @@ app.use('/api/instagram', instagramRoutes);
 app.use('/api/faqs', faqRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/chatbot', chatbotRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Backend CultiShop funcionando correctamente' });
