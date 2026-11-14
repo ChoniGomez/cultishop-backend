@@ -19,7 +19,7 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
     'image/avif',
     'image/gif'
   ];
-
+  // incluirlo
   if (allowedMimes.includes(file.mimetype.toLowerCase())) {
     cb(null, true);
   } else {
