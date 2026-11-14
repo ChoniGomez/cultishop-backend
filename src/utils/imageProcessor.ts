@@ -13,48 +13,22 @@ dotenv.config();
 export const resolveUploadsDir = (): string => {
   // 1. Variable de entorno explícita configurada en .env de la VPS
   if (process.env.UPLOADS_DIR && process.env.UPLOADS_DIR.trim()) {
-    const custom = path.resolve(process.env.UPLOADS_DIR.trim());
+    const configuredPath = process.env.UPLOADS_DIR.trim();
+    const custom = path.isAbsolute(configuredPath)
+      ? path.resolve(configuredPath)
+      : path.resolve(__dirname, '../../', configuredPath);
     if (!fs.existsSync(custom)) {
       try { fs.mkdirSync(custom, { recursive: true }); } catch {}
     }
     return custom;
   }
 
-  // 2. Comprobar si existe 'uploads' relativo al directorio de ejecución del proceso (cwd)
-  const cwdUploads = path.resolve(process.cwd(), 'uploads');
-  if (fs.existsSync(cwdUploads)) {
-    return cwdUploads;
+  // Anclar el almacenamiento a la instalación del backend, no al cwd del proceso (PM2/systemd).
+  const moduleUploads = path.resolve(__dirname, '../../uploads');
+  if (!fs.existsSync(moduleUploads)) {
+    try { fs.mkdirSync(moduleUploads, { recursive: true }); } catch {}
   }
-
-  // 3. Comprobar si existe 'backend/uploads' relativo a cwd (cuando se ejecuta desde raíz del proyecto)
-  const cwdBackendUploads = path.resolve(process.cwd(), 'backend', 'uploads');
-  if (fs.existsSync(cwdBackendUploads)) {
-    return cwdBackendUploads;
-  }
-
-  // 3b. Comprobar rutas estándar de producción en VPS Linux
-  if (fs.existsSync('/var/www/cultishop/backend/uploads')) {
-    return '/var/www/cultishop/backend/uploads';
-  }
-  if (fs.existsSync('/var/www/cultishop/uploads')) {
-    return '/var/www/cultishop/uploads';
-  }
-
-  // 4. Ubicación relativa al archivo compilado/fuente (dist/utils/../../uploads o src/utils/../../uploads)
-  const relativeUploads = path.resolve(__dirname, '../../uploads');
-  if (fs.existsSync(relativeUploads)) {
-    return relativeUploads;
-  }
-
-  // 5. Fallback por defecto: crear la carpeta backend/uploads o uploads
-  const defaultDir = fs.existsSync(path.resolve(process.cwd(), 'backend'))
-    ? cwdBackendUploads
-    : cwdUploads;
-
-  if (!fs.existsSync(defaultDir)) {
-    try { fs.mkdirSync(defaultDir, { recursive: true }); } catch {}
-  }
-  return defaultDir;
+  return moduleUploads;
 };
 
 /**

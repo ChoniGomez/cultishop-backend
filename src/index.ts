@@ -39,27 +39,6 @@ const staticOptions = {
 app.use('/uploads', express.static(UPLOADS_DIR, staticOptions));
 app.use('/api/uploads', express.static(UPLOADS_DIR, staticOptions));
 
-// Directorios físicos candidatos para servir archivos estáticos (soporte local y VPS Linux)
-const uploadDirectories = [
-  path.resolve(process.cwd(), 'uploads'),
-  path.resolve(process.cwd(), 'backend', 'uploads'),
-  path.resolve(__dirname, '../uploads'),
-  path.resolve(__dirname, '../../uploads'),
-  path.resolve(__dirname, 'uploads'),
-  '/var/www/cultishop/backend/uploads',
-  '/var/www/cultishop/uploads'
-];
-
-// 1. Exponer la carpeta de subidas de forma pública (/uploads y /api/uploads) en todas las ubicaciones posibles
-uploadDirectories.forEach((dir) => {
-  try {
-    if (fs.existsSync(dir)) {
-      app.use('/uploads', express.static(dir, staticOptions));
-      app.use('/api/uploads', express.static(dir, staticOptions));
-    }
-  } catch {}
-});
-
 // Mapeo temático de imágenes por categoría para insumos de cultivo
 const CATEGORY_DEFAULT_IMAGES: { [key: string]: string } = {
   'fertilizantes': 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=600',
@@ -107,16 +86,16 @@ const handleUploadImageRequest = async (req: express.Request, res: express.Respo
     return next();
   }
 
-  // Comprobar si el archivo físico ya existe en alguno de los directorios de almacenamiento
-  for (const dir of uploadDirectories) {
-    try {
-      const fullPath = path.join(dir, filename);
-      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-        res.setHeader('Content-Type', filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-        res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
-        return res.sendFile(fullPath);
-      }
-    } catch {}
+  // Express static y el generador bajo demanda usan el mismo directorio físico.
+  try {
+    const fullPath = path.join(UPLOADS_DIR, path.basename(filename));
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+      res.setHeader('Content-Type', filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+      return res.sendFile(fullPath);
+    }
+  } catch (error) {
+    console.error(`Error al leer la imagen ${filename} desde ${UPLOADS_DIR}:`, error);
   }
 
   // Verificar si la petición solicita la imagen determinista de un producto (product-:id.webp)

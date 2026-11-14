@@ -14,12 +14,15 @@ const normalizeProductImagePath = (imagePath) => {
     const trimmed = imagePath.trim();
     if (!trimmed || /^(https?:|data:|blob:)/i.test(trimmed))
         return trimmed;
-    const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
-    const uploadsPath = withoutLeadingSlash.replace(/^api\/uploads\//i, '').replace(/^uploads\//i, '');
-    if (uploadsPath !== withoutLeadingSlash || !trimmed.includes('/')) {
+    const normalizedPath = trimmed.replace(/\\/g, '/');
+    const withoutLeadingSlash = normalizedPath.replace(/^\/+/, '').replace(/^\.\//, '');
+    const uploadsPath = withoutLeadingSlash
+        .replace(/^api\/uploads\//i, '')
+        .replace(/^uploads\//i, '');
+    if (uploadsPath !== withoutLeadingSlash || !normalizedPath.startsWith('/')) {
         return `/uploads/${uploadsPath}`;
     }
-    return trimmed;
+    return normalizedPath;
 };
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text) => {

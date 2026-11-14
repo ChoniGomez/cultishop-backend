@@ -38,26 +38,6 @@ const staticOptions = {
 };
 app.use('/uploads', express_1.default.static(imageProcessor_1.UPLOADS_DIR, staticOptions));
 app.use('/api/uploads', express_1.default.static(imageProcessor_1.UPLOADS_DIR, staticOptions));
-// Directorios físicos candidatos para servir archivos estáticos (soporte local y VPS Linux)
-const uploadDirectories = [
-    path_1.default.resolve(process.cwd(), 'uploads'),
-    path_1.default.resolve(process.cwd(), 'backend', 'uploads'),
-    path_1.default.resolve(__dirname, '../uploads'),
-    path_1.default.resolve(__dirname, '../../uploads'),
-    path_1.default.resolve(__dirname, 'uploads'),
-    '/var/www/cultishop/backend/uploads',
-    '/var/www/cultishop/uploads'
-];
-// 1. Exponer la carpeta de subidas de forma pública (/uploads y /api/uploads) en todas las ubicaciones posibles
-uploadDirectories.forEach((dir) => {
-    try {
-        if (fs_1.default.existsSync(dir)) {
-            app.use('/uploads', express_1.default.static(dir, staticOptions));
-            app.use('/api/uploads', express_1.default.static(dir, staticOptions));
-        }
-    }
-    catch { }
-});
 // Mapeo temático de imágenes por categoría para insumos de cultivo
 const CATEGORY_DEFAULT_IMAGES = {
     'fertilizantes': 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&q=80&w=600',
@@ -97,17 +77,17 @@ const handleUploadImageRequest = async (req, res, next) => {
     if (!filename) {
         return next();
     }
-    // Comprobar si el archivo físico ya existe en alguno de los directorios de almacenamiento
-    for (const dir of uploadDirectories) {
-        try {
-            const fullPath = path_1.default.join(dir, filename);
-            if (fs_1.default.existsSync(fullPath) && fs_1.default.statSync(fullPath).isFile()) {
-                res.setHeader('Content-Type', filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-                res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
-                return res.sendFile(fullPath);
-            }
+    // Express static y el generador bajo demanda usan el mismo directorio físico.
+    try {
+        const fullPath = path_1.default.join(imageProcessor_1.UPLOADS_DIR, path_1.default.basename(filename));
+        if (fs_1.default.existsSync(fullPath) && fs_1.default.statSync(fullPath).isFile()) {
+            res.setHeader('Content-Type', filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+            res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+            return res.sendFile(fullPath);
         }
-        catch { }
+    }
+    catch (error) {
+        console.error(`Error al leer la imagen ${filename} desde ${imageProcessor_1.UPLOADS_DIR}:`, error);
     }
     // Verificar si la petición solicita la imagen determinista de un producto (product-:id.webp)
     const match = filename.match(/^product-(\d+)\.webp$/i);
