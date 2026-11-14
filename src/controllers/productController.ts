@@ -24,6 +24,26 @@ const normalizeProductImagePath = (imagePath: string): string => {
   return normalizedPath;
 };
 
+const getProductImageFilename = (
+  productName: string,
+  index: number,
+  productId?: number
+): string => {
+  if (productId) {
+    return `product-${productId}${index === 0 ? '' : `-${index + 1}`}.webp`;
+  }
+
+  const baseName = slugify(productName) || 'product';
+  const suffix = index === 0 ? '' : `-${index + 1}`;
+  let candidate = `${baseName}${suffix}.webp`;
+  let collision = 2;
+
+  while (fs.existsSync(path.join(UPLOADS_DIR, candidate))) {
+    candidate = `${baseName}${suffix}-${collision++}.webp`;
+  }
+  return candidate;
+};
+
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text: string) => {
   return text
@@ -1316,8 +1336,13 @@ export const createProduct = async (req: Request, res: Response) => {
 
     const uniqueRawImages = Array.from(new Set(rawImagesList.map(img => String(img).trim()).filter(Boolean)));
     const processedImages: string[] = [];
-    for (const raw of uniqueRawImages) {
-      const webpUrl = await processAnyImageInput(raw, 'product', 85);
+    for (const [index, raw] of uniqueRawImages.entries()) {
+      const webpUrl = await processAnyImageInput(
+        raw,
+        'product',
+        85,
+        getProductImageFilename(String(title).trim(), index)
+      );
       const normalizedImagePath = webpUrl ? normalizeProductImagePath(webpUrl) : '';
       if (normalizedImagePath && !processedImages.includes(normalizedImagePath)) {
         processedImages.push(normalizedImagePath);
@@ -1566,8 +1591,13 @@ export const updateProduct = async (req: Request, res: Response) => {
 
       if (uniqueCandidates.length > 0) {
         const processedImages: string[] = [];
-        for (const raw of uniqueCandidates) {
-          const webpUrl = await processAnyImageInput(raw, 'product', 85);
+        for (const [index, raw] of uniqueCandidates.entries()) {
+          const webpUrl = await processAnyImageInput(
+            raw,
+            'product',
+            85,
+            getProductImageFilename(current.title, index, Number(current.id))
+          );
           if (webpUrl && !processedImages.includes(webpUrl)) {
             processedImages.push(webpUrl);
           }

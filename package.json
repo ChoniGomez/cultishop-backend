@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "backup": "node ../database/backup.js",
-    "migrate:images": "node scripts/migrateImagesToWebp.js"
+    "migrate:images": "node scripts/migrateImagesToWebp.js",
+    "sync:product-images": "node scripts/syncProductImages.js"
   },
   "dependencies": {
     "@types/multer": "^2.3.0",

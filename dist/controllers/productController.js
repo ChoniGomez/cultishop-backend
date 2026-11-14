@@ -24,6 +24,19 @@ const normalizeProductImagePath = (imagePath) => {
     }
     return normalizedPath;
 };
+const getProductImageFilename = (productName, index, productId) => {
+    if (productId) {
+        return `product-${productId}${index === 0 ? '' : `-${index + 1}`}.webp`;
+    }
+    const baseName = slugify(productName) || 'product';
+    const suffix = index === 0 ? '' : `-${index + 1}`;
+    let candidate = `${baseName}${suffix}.webp`;
+    let collision = 2;
+    while (fs_1.default.existsSync(path_1.default.join(imageProcessor_1.UPLOADS_DIR, candidate))) {
+        candidate = `${baseName}${suffix}-${collision++}.webp`;
+    }
+    return candidate;
+};
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text) => {
     return text
@@ -1151,8 +1164,8 @@ const createProduct = async (req, res) => {
         }
         const uniqueRawImages = Array.from(new Set(rawImagesList.map(img => String(img).trim()).filter(Boolean)));
         const processedImages = [];
-        for (const raw of uniqueRawImages) {
-            const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85);
+        for (const [index, raw] of uniqueRawImages.entries()) {
+            const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85, getProductImageFilename(String(title).trim(), index));
             const normalizedImagePath = webpUrl ? normalizeProductImagePath(webpUrl) : '';
             if (normalizedImagePath && !processedImages.includes(normalizedImagePath)) {
                 processedImages.push(normalizedImagePath);
@@ -1343,8 +1356,8 @@ const updateProduct = async (req, res) => {
             const uniqueCandidates = Array.from(new Set(candidateImages.map(img => String(img).trim()).filter(Boolean)));
             if (uniqueCandidates.length > 0) {
                 const processedImages = [];
-                for (const raw of uniqueCandidates) {
-                    const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85);
+                for (const [index, raw] of uniqueCandidates.entries()) {
+                    const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85, getProductImageFilename(current.title, index, Number(current.id)));
                     if (webpUrl && !processedImages.includes(webpUrl)) {
                         processedImages.push(webpUrl);
                     }

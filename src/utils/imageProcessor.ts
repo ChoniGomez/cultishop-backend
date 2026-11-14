@@ -65,6 +65,49 @@ export const generateUniqueWebpFilename = (prefix: string = 'img'): string => {
   return `${sanitizedPrefix}-${timestamp}-${randomSuffix}.webp`;
 };
 
+export const sanitizeWebpFilename = (originalName: string, fallbackPrefix: string = 'image'): string => {
+  const portableName = path.basename(originalName.replace(/\\/g, '/'));
+  const extension = path.extname(portableName);
+  const originalStem = path.basename(portableName, extension);
+  const stem = originalStem
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 100);
+  const fallback = fallbackPrefix
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 100);
+
+  return `${stem || fallback || 'image'}.webp`;
+};
+
+export const getAvailableWebpFilename = (
+  originalName: string,
+  fallbackPrefix: string,
+  reservedNames: Set<string> = new Set()
+): string => {
+  const baseFilename = sanitizeWebpFilename(originalName, fallbackPrefix);
+  const extension = path.extname(baseFilename);
+  const stem = path.basename(baseFilename, extension);
+  let candidate = baseFilename;
+  let suffix = 2;
+
+  while (reservedNames.has(candidate.toLowerCase()) || fs.existsSync(path.join(UPLOADS_DIR, candidate))) {
+    candidate = `${stem}-${suffix++}${extension}`;
+  }
+
+  reservedNames.add(candidate.toLowerCase());
+  return candidate;
+};
+
 /**
  * Convierte un Buffer de imagen (PNG, JPG, JPEG, etc.) a formato .webp con calidad óptima (85%)
  * y lo almacena de forma persistente en el servidor.

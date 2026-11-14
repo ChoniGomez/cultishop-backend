@@ -1,6 +1,10 @@
 import multer from 'multer';
 import { Request, Response, NextFunction } from 'express';
-import { processBufferToWebp } from '../utils/imageProcessor';
+import {
+  getAvailableWebpFilename,
+  processBufferToWebp,
+  sanitizeWebpFilename
+} from '../utils/imageProcessor';
 
 // Almacenamiento en memoria para permitir el procesamiento con Sharp antes de escribir en disco
 const storage = multer.memoryStorage();
@@ -31,6 +35,31 @@ export const upload = multer({
   }
 });
 
+const getUploadFilename = (
+  file: Express.Multer.File,
+  prefix: string,
+  req: Request,
+  reservedNames: Set<string> = new Set()
+): string => {
+  const productId = prefix === 'product' && /^\d+$/.test(req.params.id || '')
+    ? req.params.id
+    : '';
+
+  if (!productId) {
+    return getAvailableWebpFilename(file.originalname, prefix, reservedNames);
+  }
+
+  const cleanOriginalName = sanitizeWebpFilename(file.originalname, prefix);
+  const originalStem = cleanOriginalName.replace(/\.webp$/i, '');
+  const baseFilename = `product-${productId}-${originalStem}.webp`;
+  if (!reservedNames.has(baseFilename.toLowerCase())) {
+    reservedNames.add(baseFilename.toLowerCase());
+    return baseFilename;
+  }
+
+  return getAvailableWebpFilename(baseFilename, prefix, reservedNames);
+};
+
 /**
  * Middleware que intercepta la imagen subida con Multer en memoria,
  * la convierte automáticamente a WebP al 85% de calidad y añade la URL WebP resultante al objeto req.file.
@@ -42,7 +71,8 @@ export const convertUploadToWebp = (prefix: string = 'img') => {
     }
 
     try {
-      const processed = await processBufferToWebp(req.file.buffer, prefix, 85);
+      const filename = getUploadFilename(req.file, prefix, req);
+      const processed = await processBufferToWebp(req.file.buffer, prefix, 85, filename);
       
       // Actualizar metadatos de req.file con la versión WebP
       req.file.filename = processed.filename;
@@ -87,9 +117,11 @@ export const convertMultipleUploadsToWebp = (prefix: string = 'product') => {
 
     try {
       const processedUrls: string[] = [];
+      const reservedNames = new Set<string>();
       for (const file of filesToProcess) {
         if (file.buffer) {
-          const processed = await processBufferToWebp(file.buffer, prefix, 85);
+          const filename = getUploadFilename(file, prefix, req, reservedNames);
+          const processed = await processBufferToWebp(file.buffer, prefix, 85, filename);
           file.filename = processed.filename;
           file.path = processed.url;
           file.mimetype = 'image/webp';
@@ -107,4 +139,3 @@ export const convertMultipleUploadsToWebp = (prefix: string = 'product') => {
     }
   };
 };
-
