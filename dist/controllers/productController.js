@@ -10,6 +10,17 @@ const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
 const imageProcessor_1 = require("../utils/imageProcessor");
 const roundPriceToCents = (amount) => Math.round((amount + Number.EPSILON) * 100) / 100;
+const normalizeProductImagePath = (imagePath) => {
+    const trimmed = imagePath.trim();
+    if (!trimmed || /^(https?:|data:|blob:)/i.test(trimmed))
+        return trimmed;
+    const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+    const uploadsPath = withoutLeadingSlash.replace(/^api\/uploads\//i, '').replace(/^uploads\//i, '');
+    if (uploadsPath !== withoutLeadingSlash || !trimmed.includes('/')) {
+        return `/uploads/${uploadsPath}`;
+    }
+    return trimmed;
+};
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text) => {
     return text
@@ -65,7 +76,7 @@ const sanitizeAndMigrateImage = (imageUrl, productId) => {
         return '';
     const trimmed = imageUrl.trim();
     if (!trimmed.startsWith('data:image/'))
-        return trimmed;
+        return normalizeProductImagePath(trimmed);
     const targetFilename = `product-${productId}.webp`;
     const targetWebp = `/uploads/${targetFilename}`;
     const targetFilePath = path_1.default.join(imageProcessor_1.UPLOADS_DIR, targetFilename);
@@ -153,7 +164,7 @@ const formatProductRow = (row) => {
     const cleanImages = rawImagesList
         .map((img) => {
         const imgStr = typeof img === 'string' ? img.trim() : (img?.url ? String(img.url).trim() : '');
-        return imgStr;
+        return normalizeProductImagePath(imgStr);
     })
         .filter(Boolean);
     if (cleanImage && !cleanImages.includes(cleanImage)) {
@@ -162,6 +173,8 @@ const formatProductRow = (row) => {
     else if (cleanImages.length === 0 && cleanImage) {
         cleanImages.push(cleanImage);
     }
+    const primaryImage = cleanImage || cleanImages[0] ||
+        normalizeProductImagePath(String(row.image_url || row.image || ''));
     // --- Cálculo dinámico de Ofertas y Descuentos ---
     const rawDiscountPrice = typeof row.discount_price === 'number'
         ? row.discount_price
@@ -274,10 +287,10 @@ const formatProductRow = (row) => {
         offer_condition: offerCondition,
         stock: totalStock,
         total_stock: totalStock,
-        image: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
-        image_url: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
-        imageUrl: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
-        imagen: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
+        image: primaryImage,
+        image_url: primaryImage,
+        imageUrl: primaryImage,
+        imagen: primaryImage,
         images: cleanImages.length > 0 ? cleanImages : (cleanImage ? [cleanImage] : []),
         imagenes: cleanImages.length > 0 ? cleanImages : (cleanImage ? [cleanImage] : []),
         badge: row.badge,
@@ -1137,8 +1150,9 @@ const createProduct = async (req, res) => {
         const processedImages = [];
         for (const raw of uniqueRawImages) {
             const webpUrl = await (0, imageProcessor_1.processAnyImageInput)(raw, 'product', 85);
-            if (webpUrl && !processedImages.includes(webpUrl)) {
-                processedImages.push(webpUrl);
+            const normalizedImagePath = webpUrl ? normalizeProductImagePath(webpUrl) : '';
+            if (normalizedImagePath && !processedImages.includes(normalizedImagePath)) {
+                processedImages.push(normalizedImagePath);
             }
         }
         const finalImage = processedImages[0] || '';
@@ -1337,6 +1351,14 @@ const updateProduct = async (req, res) => {
                     finalImagesJson = JSON.stringify(processedImages);
                 }
             }
+        }
+        finalImage = finalImage ? normalizeProductImagePath(finalImage) : finalImage;
+        const storedImages = parseJsonField(finalImagesJson, []);
+        if (Array.isArray(storedImages)) {
+            finalImagesJson = JSON.stringify(storedImages.map((img) => {
+                const imagePath = typeof img === 'string' ? img : img?.url;
+                return typeof imagePath === 'string' ? normalizeProductImagePath(imagePath) : img;
+            }));
         }
         // Si la imagen principal cambió y la anterior era un archivo local, limpiar el archivo viejo
         if (current.image_url && current.image_url !== finalImage) {

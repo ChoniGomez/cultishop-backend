@@ -8,6 +8,19 @@ import { processAnyImageInput, deleteOldImageFile, UPLOADS_DIR } from '../utils/
 const roundPriceToCents = (amount: number): number =>
   Math.round((amount + Number.EPSILON) * 100) / 100;
 
+const normalizeProductImagePath = (imagePath: string): string => {
+  const trimmed = imagePath.trim();
+  if (!trimmed || /^(https?:|data:|blob:)/i.test(trimmed)) return trimmed;
+
+  const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+  const uploadsPath = withoutLeadingSlash.replace(/^api\/uploads\//i, '').replace(/^uploads\//i, '');
+
+  if (uploadsPath !== withoutLeadingSlash || !trimmed.includes('/')) {
+    return `/uploads/${uploadsPath}`;
+  }
+  return trimmed;
+};
+
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text: string) => {
   return text
@@ -59,7 +72,7 @@ const normalizeStringArray = (val: any): string[] => {
 const sanitizeAndMigrateImage = (imageUrl: string | null | undefined, productId: number): string => {
   if (!imageUrl || typeof imageUrl !== 'string') return '';
   const trimmed = imageUrl.trim();
-  if (!trimmed.startsWith('data:image/')) return trimmed;
+  if (!trimmed.startsWith('data:image/')) return normalizeProductImagePath(trimmed);
 
   const targetFilename = `product-${productId}.webp`;
   const targetWebp = `/uploads/${targetFilename}`;
@@ -154,7 +167,7 @@ const formatProductRow = (row: any) => {
   const cleanImages = rawImagesList
     .map((img: any) => {
       const imgStr = typeof img === 'string' ? img.trim() : (img?.url ? String(img.url).trim() : '');
-      return imgStr;
+      return normalizeProductImagePath(imgStr);
     })
     .filter(Boolean);
 
@@ -163,6 +176,8 @@ const formatProductRow = (row: any) => {
   } else if (cleanImages.length === 0 && cleanImage) {
     cleanImages.push(cleanImage);
   }
+  const primaryImage = cleanImage || cleanImages[0] ||
+    normalizeProductImagePath(String(row.image_url || row.image || ''));
 
   // --- Cálculo dinámico de Ofertas y Descuentos ---
   const rawDiscountPrice = typeof row.discount_price === 'number' 
@@ -274,10 +289,10 @@ const formatProductRow = (row: any) => {
     offer_condition: offerCondition,
     stock: totalStock,
     total_stock: totalStock,
-    image: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
-    image_url: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
-    imageUrl: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
-    imagen: cleanImage || (cleanImages.length > 0 ? cleanImages[0] : (row.image_url || row.image || '')),
+    image: primaryImage,
+    image_url: primaryImage,
+    imageUrl: primaryImage,
+    imagen: primaryImage,
     images: cleanImages.length > 0 ? cleanImages : (cleanImage ? [cleanImage] : []),
     imagenes: cleanImages.length > 0 ? cleanImages : (cleanImage ? [cleanImage] : []),
     badge: row.badge,
@@ -1300,8 +1315,9 @@ export const createProduct = async (req: Request, res: Response) => {
     const processedImages: string[] = [];
     for (const raw of uniqueRawImages) {
       const webpUrl = await processAnyImageInput(raw, 'product', 85);
-      if (webpUrl && !processedImages.includes(webpUrl)) {
-        processedImages.push(webpUrl);
+      const normalizedImagePath = webpUrl ? normalizeProductImagePath(webpUrl) : '';
+      if (normalizedImagePath && !processedImages.includes(normalizedImagePath)) {
+        processedImages.push(normalizedImagePath);
       }
     }
 
@@ -1558,6 +1574,15 @@ export const updateProduct = async (req: Request, res: Response) => {
           finalImagesJson = JSON.stringify(processedImages);
         }
       }
+    }
+
+    finalImage = finalImage ? normalizeProductImagePath(finalImage) : finalImage;
+    const storedImages = parseJsonField(finalImagesJson, []);
+    if (Array.isArray(storedImages)) {
+      finalImagesJson = JSON.stringify(storedImages.map((img: any) => {
+        const imagePath = typeof img === 'string' ? img : img?.url;
+        return typeof imagePath === 'string' ? normalizeProductImagePath(imagePath) : img;
+      }));
     }
 
     // Si la imagen principal cambió y la anterior era un archivo local, limpiar el archivo viejo

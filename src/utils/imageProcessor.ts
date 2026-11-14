@@ -2,6 +2,9 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import sharp from 'sharp';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 /**
  * Determina y resuelve el directorio físico absoluto de uploads de forma dinámica,
