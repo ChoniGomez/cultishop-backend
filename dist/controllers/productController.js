@@ -9,6 +9,7 @@ const fs_1 = __importDefault(require("fs"));
 const database_1 = require("../config/database");
 const cache_1 = require("../utils/cache");
 const imageProcessor_1 = require("../utils/imageProcessor");
+const roundPriceToCents = (amount) => Math.round((amount + Number.EPSILON) * 100) / 100;
 // Helper para convertir título a slug amigable para URLs
 const slugify = (text) => {
     return text
@@ -197,7 +198,7 @@ const formatProductRow = (row) => {
         originalPrice = minPrice;
         if (rawDiscountPct > 0) {
             discountPercentage = rawDiscountPct;
-            finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
+            finalPrice = roundPriceToCents(originalPrice * (1 - discountPercentage / 100));
         }
         else if (rawDiscountPrice > 0 && rawDiscountPrice < minPrice) {
             finalPrice = rawDiscountPrice;
@@ -206,7 +207,7 @@ const formatProductRow = (row) => {
         else {
             // Valor por defecto si se activó la oferta sin porcentaje explícito
             discountPercentage = 15;
-            finalPrice = Math.round(originalPrice * (1 - discountPercentage / 100) * 100) / 100;
+            finalPrice = roundPriceToCents(originalPrice * (1 - discountPercentage / 100));
         }
         savingsAmount = Math.max(0, originalPrice - finalPrice);
     }
@@ -255,7 +256,7 @@ const formatProductRow = (row) => {
         title: row.title,
         slug: row.slug,
         description: row.description,
-        price: isOnOffer ? finalPrice : minPrice,
+        price: minPrice,
         original_price: originalPrice,
         final_price: finalPrice,
         min_price: minPrice,
@@ -928,7 +929,7 @@ const setProductOfferStatus = async (req, res) => {
         }
         if (targetPct <= 0)
             targetPct = 15;
-        const targetDiscountPrice = Math.round(basePrice * (1 - targetPct / 100) * 100) / 100;
+        const targetDiscountPrice = roundPriceToCents(basePrice * (1 - targetPct / 100));
         // Normalizar vigencia y fechas
         const startDate = offer_start_date !== undefined
             ? (offer_start_date ? new Date(offer_start_date) : null)
