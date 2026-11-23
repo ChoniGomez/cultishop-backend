@@ -8,9 +8,11 @@
     "start": "node dist/index.js",
     "backup": "node ../database/backup.js",
     "migrate:images": "node scripts/migrateImagesToWebp.js",
-    "sync:product-images": "node scripts/syncProductImages.js"
+    "sync:product-images": "node scripts/syncProductImages.js",
+    "test:chatbot": "ts-node-dev --transpile-only --no-notify --exit-child scripts/testChatbot.ts"
   },
   "dependencies": {
+    "@google/genai": "^3.3.0",
     "@types/multer": "^2.3.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
